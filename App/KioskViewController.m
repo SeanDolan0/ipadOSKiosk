@@ -1,3 +1,263 @@
 #import "KioskViewController.h"
-@implementation KioskViewController
+#import "ScreensaverView.h"
+#import "NetworkMonitor.h"
+#import "DaemonBridge.h"
+#import "TelemetryRelay.h"
+
+#define HA_BASE_URL  @"http://192.168.50.150:8123"
+#define HA_TOKEN     @"YOUR_LONG_LIVED_ACCESS_TOKEN_HERE"
+#define DASHBOARD_PATH @"/lovelace/0"
+#define TELEMETRY_INTERVAL 30
+
+@implementation KioskViewController {
+    WKWebView *_webView;
+    ScreensaverView *_screensaver;
+    NetworkMonitor *_networkMonitor;
+    DaemonBridge *_daemonBridge;
+    TelemetryRelay *_telemetryRelay;
+    NSTimer *_telemetryTimer;
+    NSTimer *_idleTimer;
+    BOOL _screensaverActive;
+    BOOL _isConnected;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = [UIColor blackColor];
+
+    _networkMonitor = [[NetworkMonitor alloc] init];
+    _daemonBridge = [[DaemonBridge alloc] init];
+    _telemetryRelay = [[TelemetryRelay alloc] initWithBaseURL:HA_BASE_URL
+                                                       token:HA_TOKEN];
+
+    [self setupWebView];
+
+    _screensaver = [[ScreensaverView alloc] initWithFrame:self.view.bounds];
+    _screensaver.delegate = self;
+    _screensaver.hidden = YES;
+    [self.view addSubview:_screensaver];
+
+    __weak typeof(self) weakSelf = self;
+    _networkMonitor.onStateChange = ^(BOOL connected) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf handleNetworkChange:connected];
+        });
+    };
+    [_networkMonitor start];
+
+    _telemetryTimer = [NSTimer scheduledTimerWithTimeInterval:TELEMETRY_INTERVAL
+                                                      target:self
+                                                    selector:@selector(fetchAndRelayTelemetry)
+                                                    userInfo:nil
+                                                     repeats:YES];
+
+    [self resetIdleTimer];
+    [self loadDashboard];
+}
+
+#pragma mark - WKWebView Setup
+
+- (void)setupWebView {
+    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+
+    WKUserContentController *ucc = [[WKUserContentController alloc] init];
+    [ucc addScriptMessageHandler:self name:@"kiosk"];
+
+    NSString *authJS = [NSString stringWithFormat:
+        @"window._kioskToken = '%@';", HA_TOKEN];
+    WKUserScript *authScript = [[WKUserScript alloc]
+        initWithSource:authJS
+         injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+      forMainFrameOnly:YES];
+    [ucc addUserScript:authScript];
+
+    config.userContentController = ucc;
+
+    _webView = [[WKWebView alloc] initWithFrame:self.view.bounds configuration:config];
+    _webView.navigationDelegate = self;
+    _webView.allowsBackForwardNavigationGestures = NO;
+    _webView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                UIViewAutoresizingFlexibleHeight;
+
+    NSString *interceptJS =
+        @"(function() {"
+        "  var origFetch = window.fetch;"
+        "  window.fetch = function(url, opts) {"
+        "    opts = opts || {};"
+        "    opts.headers = opts.headers || {};"
+        "    opts.headers['Authorization'] = 'Bearer " HA_TOKEN "';"
+        "    return origFetch(url, opts);"
+        "};"
+        "  var origXHR = XMLHttpRequest.prototype.open;"
+        "  XMLHttpRequest.prototype.open = function(method, url) {"
+        "    this._url = url;"
+        "    return origXHR.apply(this, arguments);"
+        "};"
+        "  XMLHttpRequest.prototype.send = function() {"
+        "    this.setRequestHeader('Authorization', 'Bearer " HA_TOKEN "');"
+        "    return XMLHttpRequest.prototype.send.apply(this, arguments);"
+        "};"
+        "})();";
+    WKUserScript *interceptScript = [[WKUserScript alloc]
+        initWithSource:interceptJS
+         injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+      forMainFrameOnly:YES];
+    [ucc addUserScript:interceptScript];
+
+    [self.view insertSubview:_webView atIndex:0];
+}
+
+#pragma mark - Dashboard Loading
+
+- (void)loadDashboard {
+    NSString *urlString = [NSString stringWithFormat:@"%@%@", HA_BASE_URL, DASHBOARD_PATH];
+    NSURL *url = [NSURL URLWithString:urlString];
+    NSURLRequest *request = [NSURLRequest requestWithURL:url];
+    [_webView loadRequest:request];
+}
+
+- (void)reloadDashboard {
+    [_webView reload];
+}
+
+#pragma mark - Network State
+
+- (void)handleNetworkChange:(BOOL)connected {
+    _isConnected = connected;
+    if (connected) {
+        [self reloadDashboard];
+    }
+}
+
+#pragma mark - Telemetry
+
+- (void)fetchAndRelayTelemetry {
+    [_daemonBridge fetchTelemetryWithCompletion:^(NSDictionary *telemetry) {
+        if (telemetry) {
+            [self->_telemetryRelay relayTelemetry:telemetry];
+        }
+    }];
+
+    [_daemonBridge checkWakeWithCompletion:^(BOOL shouldWake) {
+        if (shouldWake && self->_screensaverActive) {
+            [self dismissScreensaver];
+        }
+    }];
+}
+
+#pragma mark - Screensaver
+
+- (void)resetIdleTimer {
+    [_idleTimer invalidate];
+
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:
+        @"/var/mobile/Library/Preferences/com.hasmartboard.plist"];
+    NSTimeInterval timeout = 300;
+    NSNumber *customTimeout = prefs[@"screensaver"][@"idleTimeout"];
+    if (customTimeout) timeout = [customTimeout doubleValue];
+
+    _idleTimer = [NSTimer scheduledTimerWithTimeInterval:timeout
+                                                 target:self
+                                               selector:@selector(showScreensaver)
+                                               userInfo:nil
+                                                repeats:NO];
+}
+
+- (void)showScreensaver {
+    if (_screensaverActive) return;
+    _screensaverActive = YES;
+
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:
+        @"/var/mobile/Library/Preferences/com.hasmartboard.plist"];
+    NSString *mode = prefs[@"screensaver"][@"mode"] ?: @"clock";
+    NSArray *photoURLs = prefs[@"screensaver"][@"photoURLs"];
+    float dimBrightness = [prefs[@"screensaver"][@"dimBrightness"] floatValue];
+    if (dimBrightness <= 0) dimBrightness = 0.1;
+
+    [_screensaver configureWithMode:mode photoURLs:photoURLs dimBrightness:dimBrightness];
+    _screensaver.hidden = NO;
+    [_screensaver fadeIn];
+}
+
+- (void)dismissScreensaver {
+    if (!_screensaverActive) return;
+    _screensaverActive = NO;
+    [_screensaver fadeOut];
+    [self resetIdleTimer];
+}
+
+#pragma mark - ScreensaverViewDelegate
+
+- (void)screensaverDidReceiveTouch {
+    [self dismissScreensaver];
+}
+
+#pragma mark - WKNavigationDelegate
+
+- (void)webView:(WKWebView *)webView
+    didFinishNavigation:(WKNavigation *)navigation {
+    NSLog(@"KioskViewController: dashboard loaded");
+}
+
+- (void)webView:(WKWebView *)webView
+    didFailNavigation:(WKNavigation *)navigation
+            withError:(NSError *)error {
+    NSLog(@"KioskViewController: navigation failed: %@", error.localizedDescription);
+}
+
+- (void)webView:(WKWebView *)webView
+    didFailProvisionalNavigation:(WKNavigation *)navigation
+                       withError:(NSError *)error {
+    NSLog(@"KioskViewController: provisional navigation failed: %@", error.localizedDescription);
+}
+
+#pragma mark - WKScriptMessageHandler
+
+- (void)userContentController:(WKUserContentController *)ucc
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+    if ([message.name isEqualToString:@"kiosk"]) {
+        NSDictionary *body = message.body;
+        NSString *type = body[@"type"];
+
+        if ([type isEqualToString:@"setBrightness"]) {
+            float value = [body[@"value"] floatValue];
+            [self postCommand:@"setBrightness" value:[NSString stringWithFormat:@"%.2f", value]];
+        }
+        else if ([type isEqualToString:@"setVolume"]) {
+            float value = [body[@"value"] floatValue];
+            [self postCommand:@"setVolume" value:[NSString stringWithFormat:@"%.2f", value]];
+        }
+        else if ([type isEqualToString:@"wake"]) {
+            [self dismissScreensaver];
+        }
+    }
+}
+
+#pragma mark - Daemon Command Helper
+
+- (void)postCommand:(NSString *)action value:(NSString *)value {
+    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:9090/command"];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.HTTPMethod = @"POST";
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+
+    NSDictionary *body = @{@"action": action, @"value": value ?: @""};
+    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+        dataTaskWithRequest:request
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (error) {
+                NSLog(@"KioskViewController: command failed: %@", error.localizedDescription);
+            }
+        }];
+    [task resume];
+}
+
+- (void)dealloc {
+    [_telemetryTimer invalidate];
+    [_idleTimer invalidate];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
 @end
