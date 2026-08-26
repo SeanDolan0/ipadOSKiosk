@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>ha</key>
+    <dict>
+        <key>url</key>
+        <string>http://192.168.50.150:8123</string>
+        <key>token</key>
+        <string>YOUR_LONG_LIVED_ACCESS_TOKEN_HERE</string>
+        <key>dashboardPath</key>
+        <string>/lovelace/0</string>
+    </dict>
+    <key>screensaver</key>
+    <dict>
+        <key>enabled</key>
+        <true/>
+        <key>idleTimeout</key>
+        <integer>300</integer>
+        <key>mode</key>
+        <string>clock</string>
+        <key>clockFormat</key>
+        <string>HH:mm</string>
+        <key>photoURLs</key>
+        <array>
+            <string>http://192.168.50.150:8123/api/camera_proxy/camera.living_room</string>
+        </array>
+        <key>dimBrightness</key>
+        <real>0.1</real>
+    </dict>
+    <key>daemon</key>
+    <dict>
+        <key>httpPort</key>
+        <integer>9090</integer>
+        <key>telemetryInterval</key>
+        <integer>30</integer>
+    </dict>
+</dict>
+</plist>
