@@ -1,3 +1,20 @@
 .theos/
 packages/
 *.deb
+
+# On-device scratch (debug loops, QA experiments, stale layout)
+img/
+MinimalRotate/
+blinktest_src/
+crash_local/
+screen_local/
+jb_local/
+app_local/
+Layout/
+ROTATION_*.md
+DEBUG_LOG.md
+loop-*
+qwen-*
+context_for_qwen.md
+deploy_from_package.sh
+install_on_ipad.sh
