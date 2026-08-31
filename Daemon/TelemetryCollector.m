@@ -10,21 +10,12 @@
 #include <stdlib.h>
 #include <time.h>
 #include <syslog.h>
+#include <dlfcn.h>
 
 // IOKit PowerSources declarations (headers not in iOS SDK, symbols in IOKit.tbd)
 extern CFTypeRef IOPSCopyPowerSourcesInfo(void);
 extern CFArrayRef IOPSCopyPowerSourcesList(CFTypeRef blob);
 extern CFDictionaryRef IOPSGetPowerSourceDescription(CFTypeRef blob, CFTypeRef source);
-
-// MobileWiFi extern declarations (private framework, no headers in SDK)
-extern void *WiFiManagerClientCreate(void *allocator);
-extern void *WiFiManagerClientCopyCurrentNetwork(void *manager);
-extern int32_t WiFiNetworkGetRSSI(void *network);
-extern const char *WiFiNetworkGetSSID(void *network);
-extern const char *WiFiNetworkGetBSSID(void *network);
-extern uint32_t WiFiNetworkGetChannel(void *network);
-extern uint64_t WiFiNetworkGetLinkSpeed(void *network);
-extern int32_t WiFiNetworkGetNoise(void *network);
 
 #pragma mark - Battery (IOKit IOPowerSources)
 
@@ -42,6 +33,9 @@ static int collectBattery(TelemetrySnapshot *s) {
     CFStringRef capKey = CFStringCreateWithCString(NULL, "Current Capacity", kCFStringEncodingMacRoman);
     CFStringRef maxKey = CFStringCreateWithCString(NULL, "Max Capacity", kCFStringEncodingMacRoman);
     CFStringRef cycKey = CFStringCreateWithCString(NULL, "Cycle Count", kCFStringEncodingMacRoman);
+    CFStringRef ampKey = CFStringCreateWithCString(NULL, "Amperage", kCFStringEncodingMacRoman);
+    CFStringRef tempKey = CFStringCreateWithCString(NULL, "Temperature", kCFStringEncodingMacRoman);
+    CFStringRef voltKey = CFStringCreateWithCString(NULL, "Voltage", kCFStringEncodingMacRoman);
     CFNumberRef val;
     val = (CFNumberRef)CFDictionaryGetValue(desc, capKey);
     if (val && CFGetTypeID(val) == CFNumberGetTypeID())
@@ -55,29 +49,83 @@ static int collectBattery(TelemetrySnapshot *s) {
     val = (CFNumberRef)CFDictionaryGetValue(desc, cycKey);
     if (val && CFGetTypeID(val) == CFNumberGetTypeID())
         CFNumberGetValue(val, kCFNumberIntType, &s->batteryCycles);
+    val = (CFNumberRef)CFDictionaryGetValue(desc, ampKey);
+    if (val && CFGetTypeID(val) == CFNumberGetTypeID())
+        CFNumberGetValue(val, kCFNumberIntType, &s->batteryCurrentMA);
+    val = (CFNumberRef)CFDictionaryGetValue(desc, tempKey);
+    if (val && CFGetTypeID(val) == CFNumberGetTypeID())
+        CFNumberGetValue(val, kCFNumberIntType, &s->batteryTempDeciC);
+    val = (CFNumberRef)CFDictionaryGetValue(desc, voltKey);
+    if (val && CFGetTypeID(val) == CFNumberGetTypeID())
+        CFNumberGetValue(val, kCFNumberIntType, &s->batteryVoltageMV);
     CFRelease(capKey);
     CFRelease(maxKey);
     CFRelease(cycKey);
+    CFRelease(ampKey);
+    CFRelease(tempKey);
+    CFRelease(voltKey);
     CFRelease(sources);
     CFRelease(info);
     return 0;
 }
 
-#pragma mark - WiFi (MobileWiFi.framework)
+#pragma mark - WiFi (private MobileWiFi API, resolved at runtime)
 
+// MobileWiFi's current-network symbols vary by iOS build (and can be absent),
+// so everything is dlsym'd and any missing symbol degrades to empty wifi
+// metrics instead of aborting. On iOS 12 the property route is
+// WiFiManagerClientCopyDevices → WiFiDeviceClientCopyProperty.
 static int collectWiFi(TelemetrySnapshot *s) {
-    void *manager = WiFiManagerClientCreate(NULL);
+    void *(*createFn)(void *) = dlsym(RTLD_DEFAULT, "WiFiManagerClientCreate");
+    CFArrayRef (*devicesFn)(void *) = dlsym(RTLD_DEFAULT, "WiFiManagerClientCopyDevices");
+    CFTypeRef (*propFn)(void *, CFStringRef) = dlsym(RTLD_DEFAULT, "WiFiDeviceClientCopyProperty");
+    if (!createFn || !devicesFn || !propFn) return -1;
+
+    void *manager = createFn(NULL);
     if (!manager) return -1;
-    void *network = WiFiManagerClientCopyCurrentNetwork(manager);
-    if (!network) return -1;
-    s->wifiRSSI = WiFiNetworkGetRSSI(network);
-    const char *ssid = WiFiNetworkGetSSID(network);
-    if (ssid) { strncpy(s->wifiSSID, ssid, sizeof(s->wifiSSID) - 1); s->wifiSSID[sizeof(s->wifiSSID) - 1] = '\0'; }
-    const char *bssid = WiFiNetworkGetBSSID(network);
-    if (bssid) { strncpy(s->wifiBSSID, bssid, sizeof(s->wifiBSSID) - 1); s->wifiBSSID[sizeof(s->wifiBSSID) - 1] = '\0'; }
-    s->wifiChannel = (int)WiFiNetworkGetChannel(network);
-    s->wifiLinkSpeed = (int)WiFiNetworkGetLinkSpeed(network);
-    s->wifiNoise = WiFiNetworkGetNoise(network);
+    CFArrayRef devices = devicesFn(manager);
+    if (!devices || CFArrayGetCount(devices) == 0) {
+        if (devices) CFRelease(devices);
+        return -1;
+    }
+    void *device = (void *)CFArrayGetValueAtIndex(devices, 0);
+
+    CFStringRef ssidKey = CFStringCreateWithCString(NULL, "SSID", kCFStringEncodingUTF8);
+    CFStringRef bssidKey = CFStringCreateWithCString(NULL, "BSSID", kCFStringEncodingUTF8);
+    CFStringRef rssiKey = CFStringCreateWithCString(NULL, "RSSI", kCFStringEncodingUTF8);
+    CFStringRef chanKey = CFStringCreateWithCString(NULL, "CHANNEL", kCFStringEncodingUTF8);
+    CFStringRef speedKey = CFStringCreateWithCString(NULL, "LINK_SPEED", kCFStringEncodingUTF8);
+    CFStringRef noiseKey = CFStringCreateWithCString(NULL, "NOISE", kCFStringEncodingUTF8);
+
+    CFTypeRef v = propFn(device, ssidKey);
+    if (v && CFGetTypeID(v) == CFStringGetTypeID()) {
+        const char *ssid = CFStringGetCStringPtr(v, kCFStringEncodingUTF8);
+        if (ssid) { strncpy(s->wifiSSID, ssid, sizeof(s->wifiSSID) - 1); s->wifiSSID[sizeof(s->wifiSSID) - 1] = '\0'; }
+    }
+    v = propFn(device, bssidKey);
+    if (v && CFGetTypeID(v) == CFStringGetTypeID()) {
+        const char *bssid = CFStringGetCStringPtr(v, kCFStringEncodingUTF8);
+        if (bssid) { strncpy(s->wifiBSSID, bssid, sizeof(s->wifiBSSID) - 1); s->wifiBSSID[sizeof(s->wifiBSSID) - 1] = '\0'; }
+    }
+    v = propFn(device, rssiKey);
+    if (v && CFGetTypeID(v) == CFNumberGetTypeID())
+        CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &s->wifiRSSI);
+    v = propFn(device, chanKey);
+    if (v && CFGetTypeID(v) == CFNumberGetTypeID())
+        CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &s->wifiChannel);
+    v = propFn(device, speedKey);
+    if (v && CFGetTypeID(v) == CFNumberGetTypeID()) {
+        int speed = 0;
+        CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &speed);
+        s->wifiLinkSpeed = speed;
+    }
+    v = propFn(device, noiseKey);
+    if (v && CFGetTypeID(v) == CFNumberGetTypeID())
+        CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &s->wifiNoise);
+
+    CFRelease(ssidKey); CFRelease(bssidKey); CFRelease(rssiKey);
+    CFRelease(chanKey); CFRelease(speedKey); CFRelease(noiseKey);
+    CFRelease(devices);
     return 0;
 }
 

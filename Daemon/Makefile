@@ -1,4 +1,4 @@
-TARGET = iphone:clang:12.2:12.0
+TARGET = iphone:clang:12.4:12.0
 ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk
@@ -16,6 +16,6 @@ kioskd_FRAMEWORKS = IOKit Foundation
 kioskd_PRIVATE_FRAMEWORKS = MobileWiFi
 kioskd_LDFLAGS = -Wl,-undefined,dynamic_lookup
 
-kioskd_INSTALL_PATH = /Library/Application\ Support/HASmartboard
+kioskd_INSTALL_PATH = /Library/Application Support/HASmartboard
 
 include $(THEOS_MAKE_PATH)/tool.mk

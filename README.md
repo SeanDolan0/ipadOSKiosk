@@ -31,7 +31,7 @@ export PATH="$THEOS/bin:$PATH"
 
 make clean            # optional
 make                  # builds HASmartboard + kioskd
-make package          # (optional) .deb in packages/
+make package          # .deb in packages/ — REQUIRED before make install
 make install          # installs app → /Applications, daemon → /Library/Application Support/HASmartboard
 uicache -a            # or: uicache -p /Applications/HASmartboard.app — refresh SpringBoard registration
 
@@ -39,13 +39,17 @@ uicache -a            # or: uicache -p /Applications/HASmartboard.app — refres
 launchctl load /Library/LaunchDaemons/com.hasmartboard.daemon.plist
 ```
 
+> **Full Windows→iPad procedure is in [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)** — sync, build, the post-install steps Theos doesn't do for you (`ldid` re-sign, plist `chown`, `launchctl reload`, `uicache`), verification, and config. Read it before deploying. Note: on this device Theos lives at `/opt/theos` (not `$HOME/theos`) and `TARGET = iphone:clang:12.4:12.0` is already pinned in the Makefiles — don't override it.
 The app is opened from the home screen by SpringBoard. It is intentionally **not** a launchd job, so there is no `com.hasmartboard.app.plist`.
 
 ## Configuration
 
-- Home Assistant URL/token/dashboard: edit the `#define`s at the top of `App/KioskViewController.m`
-  (`HA_BASE_URL`, `HA_TOKEN`, `DASHBOARD_PATH`), then rebuild.
-- Screensaver settings (`/var/mobile/Library/Preferences/com.hasmartboard.plist`):
+- Home Assistant URL/token/dashboard: read from `/var/mobile/Library/Preferences/com.hasmartboard.plist`
+  (`ha.url`, `ha.token`, `ha.dashboardPath`) when the app starts, with code defaults in
+  `App/KioskViewController.m:loadHAConfig` (URL `http://192.168.50.150:8123`, dashboard `/bedroom-kiosk/0`).
+  The `ha.token` is a Home Assistant **long-lived access token**; it lives only in the device plist,
+  never in git. Full schema: `config.plist.example`.
+- Screensaver settings (same plist):
 
 ```xml
 <key>screensaver</key>

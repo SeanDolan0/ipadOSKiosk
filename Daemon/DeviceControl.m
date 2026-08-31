@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/syslog.h>
+#include <dlfcn.h>
 
 // RB_AUTOBOOT not in iOS SDK headers, defined in BSD <sys/reboot.h>
 #ifndef RB_AUTOBOOT
@@ -15,10 +16,6 @@
 
 // BackBoardServices — brightness control
 extern void BBSetBrightness(float value);
-
-// MobileWiFi — WiFi toggle
-extern void *WiFiManagerClientCreate(void *allocator);
-extern void WiFiManagerClientSetPower(void *manager, int power);
 
 #pragma mark - Brightness
 
@@ -66,9 +63,17 @@ static void muteVolume(const char *value) {
 
 static void toggleWiFi(const char *value) {
     int power = (strcmp(value, "true") == 0) ? 1 : 0;
-    void *manager = WiFiManagerClientCreate(NULL);
+    // MobileWiFi is a private API whose symbols vary by iOS build; resolve at
+    // runtime so a missing symbol fails the command instead of crashing kioskd.
+    void *(*createFn)(void *) = dlsym(RTLD_DEFAULT, "WiFiManagerClientCreate");
+    void (*setPowerFn)(void *, int) = dlsym(RTLD_DEFAULT, "WiFiManagerClientSetPower");
+    if (!createFn || !setPowerFn) {
+        syslog(LOG_WARNING, "kioskd: WiFi control unavailable");
+        return;
+    }
+    void *manager = createFn(NULL);
     if (manager) {
-        WiFiManagerClientSetPower(manager, power);
+        setPowerFn(manager, power);
         CFRelease(manager);
         syslog(LOG_NOTICE, "kioskd: WiFi %s", power ? "on" : "off");
     }

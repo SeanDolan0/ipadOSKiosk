@@ -7,7 +7,7 @@ THEOS_DEVICE_PORT = 22
 THEOS_DEVICE_USER = root
 
 INSTALL_TARGET_PROCESSES = HASmartboard
-TARGET = iphone:clang:12.2:12.0
+TARGET = iphone:clang:12.4:12.0
 ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk

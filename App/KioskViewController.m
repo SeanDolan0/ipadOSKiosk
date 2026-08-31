@@ -20,9 +20,6 @@
     NSString *_haBaseURL;
     NSString *_haToken;
     NSString *_dashboardPath;
-    UILabel *_orientationDiagnostics;
-    NSUInteger _layoutCount;
-    NSUInteger _transitionCount;
 }
 
 - (void)viewDidLoad {
@@ -35,12 +32,6 @@
     _daemonBridge = [[DaemonBridge alloc] init];
     _telemetryRelay = [[TelemetryRelay alloc] initWithBaseURL:_haBaseURL
                                                        token:_haToken];
-    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(deviceOrientationDidChange:)
-                                                 name:UIDeviceOrientationDidChangeNotification
-                                               object:nil];
-    [self setupOrientationDiagnostics];
 
     [self setupWebView];
 
@@ -67,90 +58,15 @@
     [self loadDashboard];
 }
 
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    [self updateOrientationDiagnostics];
-}
-
-- (void)deviceOrientationDidChange:(NSNotification *)notification {
-    (void)notification;
-    [self updateOrientationDiagnostics];
-}
-
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    _layoutCount++;
     _webView.frame = self.view.bounds;
     _screensaver.frame = self.view.bounds;
-    [self updateOrientationDiagnostics];
-}
-
-- (void)setupOrientationDiagnostics {
-    _orientationDiagnostics = [[UILabel alloc] initWithFrame:CGRectZero];
-    _orientationDiagnostics.numberOfLines = 0;
-    _orientationDiagnostics.textColor = [UIColor whiteColor];
-    _orientationDiagnostics.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
-    _orientationDiagnostics.font = [UIFont systemFontOfSize:12.0];
-    _orientationDiagnostics.textAlignment = NSTextAlignmentLeft;
-    _orientationDiagnostics.layer.cornerRadius = 4.0;
-    _orientationDiagnostics.clipsToBounds = YES;
-    _orientationDiagnostics.hidden = NO;
-    [self.view addSubview:_orientationDiagnostics];
-}
-
-- (NSString *)orientationName:(UIDeviceOrientation)orientation {
-    switch (orientation) {
-        case UIDeviceOrientationPortrait: return @"Portrait";
-        case UIDeviceOrientationPortraitUpsideDown: return @"PortraitUpsideDown";
-        case UIDeviceOrientationLandscapeLeft: return @"LandscapeLeft";
-        case UIDeviceOrientationLandscapeRight: return @"LandscapeRight";
-        case UIDeviceOrientationFaceUp: return @"FaceUp";
-        case UIDeviceOrientationFaceDown: return @"FaceDown";
-        default: return @"Unknown";
-    }
-}
-
-- (NSString *)interfaceOrientationName:(UIInterfaceOrientation)orientation {
-    switch (orientation) {
-        case UIInterfaceOrientationPortrait: return @"Portrait";
-        case UIInterfaceOrientationPortraitUpsideDown: return @"PortraitUpsideDown";
-        case UIInterfaceOrientationLandscapeLeft: return @"LandscapeLeft";
-        case UIInterfaceOrientationLandscapeRight: return @"LandscapeRight";
-        default: return @"Unknown";
-    }
-}
-
-- (void)updateOrientationDiagnostics {
-    if (!_orientationDiagnostics) return;
-
-    UIInterfaceOrientation statusBarOrientation =
-        [UIApplication sharedApplication].statusBarOrientation;
-    NSString *deviceOrientation = [self orientationName:[UIDevice currentDevice].orientation];
-    NSString *statusOrientation = [self interfaceOrientationName:statusBarOrientation];
-    UIInterfaceOrientationMask supported = [self supportedInterfaceOrientations];
-
-    _orientationDiagnostics.text = [NSString stringWithFormat:
-        @"Device: %@\nStatus: %@\nView: %.0f x %.0f\nLayout: %lu  Transition: %lu\nMask: 0x%lx",
-        deviceOrientation,
-        statusOrientation,
-        self.view.bounds.size.width,
-        self.view.bounds.size.height,
-        (unsigned long)_layoutCount,
-        (unsigned long)_transitionCount,
-        (unsigned long)supported];
-    [_orientationDiagnostics sizeToFit];
-    CGRect frame = _orientationDiagnostics.frame;
-    frame.origin = CGPointMake(8.0, 8.0);
-    frame.size.width += 12.0;
-    frame.size.height += 8.0;
-    _orientationDiagnostics.frame = frame;
-    [self.view bringSubviewToFront:_orientationDiagnostics];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
        withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-    _transitionCount++;
 
     [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> transitionContext) {
         self->_webView.frame = (CGRect){CGPointZero, size};
@@ -167,7 +83,7 @@
     
     _haBaseURL = haConfig[@"url"] ?: @"http://192.168.50.150:8123";
     _haToken = haConfig[@"token"] ?: @"";
-    _dashboardPath = haConfig[@"dashboardPath"] ?: @"/lovelace/0";
+    _dashboardPath = haConfig[@"dashboardPath"] ?: @"/bedroom-kiosk/0";
     
     NSLog(@"KioskViewController: Loaded HA config - URL: %@, Dashboard: %@", _haBaseURL, _dashboardPath);
 }
@@ -383,7 +299,6 @@ NSString *authJS = [NSString stringWithFormat:
     [_telemetryTimer invalidate];
     [_idleTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
 }
 
 @end
