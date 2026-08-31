@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/syslog.h>
 
 static HAReporterConfig g_config;
 

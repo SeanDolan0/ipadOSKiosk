@@ -15,45 +15,92 @@ Home Assistant kiosk dashboard for jailbroken iPadOS 12.5.8 (iPad Mini 2).
 
 - iPad Mini 2 (A7, arm64) running iPadOS 12.5.8
 - Jailbroken via checkra1n or Amethyst
-- OpenSSH installed on iPad
-- Theos build system on Linux/WSL/Mac
+- OpenSSH (for reaching the device)
+- **Theos installed on the iPad** with an arm64 iOS 12 SDK — all builds run on-device
 - Home Assistant instance on local network
 
-## Quick Start
+## Build on the iPad (the only supported method)
 
-1. Clone this repo
-2. Edit `Daemon/main.m` — set `HA_URL` and `HA_TOKEN`
-3. Edit `App/KioskViewController.m` — set `HA_BASE_URL` and `HA_TOKEN`
-4. Build: `make clean && make`
-5. Package: `make package`
-6. Deploy: `make package install`
-
-## Manual Deploy
+Everything is built on the iPad with Theos. On-device builds (`make install` + `uicache`) are the only way the app registers with SpringBoard as rotatable. A binary cross-compiled elsewhere and dropped into `/Applications` stays pinned in portrait — the rotation request never reaches the app, and `uicache` alone cannot fix a pre-built binary.
 
 ```bash
-# Transfer
-scp packages/*.deb root@192.168.50.53:/tmp/
+# in a terminal on the iPad (or over SSH)
+cd <project checkout on device>
+export THEOS="$HOME/theos"
+export PATH="$THEOS/bin:$PATH"
 
-# Install
-ssh root@192.168.50.53 "dpkg -i /tmp/com.hasmartboard_*.deb"
+make clean            # optional
+make                  # builds HASmartboard + kioskd
+make package          # (optional) .deb in packages/
+make install          # installs app → /Applications, daemon → /Library/Application Support/HASmartboard
+uicache -a            # or: uicache -p /Applications/HASmartboard.app — refresh SpringBoard registration
 
-# Load services
-ssh root@192.168.50.53 "launchctl load /Library/LaunchDaemons/com.hasmartboard.daemon.plist"
-ssh root@192.168.50.53 "launchctl load /Library/LaunchDaemons/com.hasmartboard.app.plist"
+# only the daemon is a launchd job
+launchctl load /Library/LaunchDaemons/com.hasmartboard.daemon.plist
 ```
+
+The app is opened from the home screen by SpringBoard. It is intentionally **not** a launchd job, so there is no `com.hasmartboard.app.plist`.
+
+## Configuration
+
+- Home Assistant URL/token/dashboard: edit the `#define`s at the top of `App/KioskViewController.m`
+  (`HA_BASE_URL`, `HA_TOKEN`, `DASHBOARD_PATH`), then rebuild.
+- Screensaver settings (`/var/mobile/Library/Preferences/com.hasmartboard.plist`):
+
+```xml
+<key>screensaver</key>
+<dict>
+    <key>mode</key><string>clock</string>  <!-- clock, photo -->
+    <key>idleTimeout</key><integer>300</integer>  <!-- seconds -->
+    <key>dimBrightness</key><real>0.1</real>
+    <key>photoURLs</key><array><string>http://...</string></array>
+</dict>
+```
+
+Full schema in `config.plist.example`.
+
+## Verification & logs (on the iPad)
+
+```bash
+ps aux | grep -E 'kioskd|HASmartboard' | grep -v grep
+curl http://127.0.0.1:9090/health
+curl http://127.0.0.1:9090/telemetry
+launchctl list | grep hasmartboard
+tail -f /var/log/kioskd.log
+tail -f /var/log/hasmartboard.log
+```
+
+## Troubleshooting
+
+- **Daemon killed (`Killed: 9`, exit 137)** — the jailbreak hook
+  `/usr/lib/base_hook.dylib` SIGKILLs binaries under `/Library/Application Support/`
+  unless they carry `com.apple.private.security.no-sandbox`. Re-sign on-device with
+  `ldid` using `Daemon/kioskd.entitlements`:
+
+  ```bash
+  ldid -S<path>/kioskd.entitlements '/Library/Application Support/HASmartboard/kioskd'
+  launchctl unload /Library/LaunchDaemons/com.hasmartboard.daemon.plist
+  launchctl load   /Library/LaunchDaemons/com.hasmartboard.daemon.plist
+  ```
+
+- **App pinned in portrait** — it wasn't installed via an on-device `make install` + `uicache`.
+  Rebuild on the iPad as above. (Running `uicache` after manually copying a pre-built binary is not sufficient.)
+- **HA URL change** — hardcoded in `App/KioskViewController.m`; edit and rebuild.
 
 ## Security
 
 Change the default root password:
+
 ```bash
 ssh root@192.168.50.53 "passwd"
 ```
 
 ## Architecture
 
-- `kioskd` — Root daemon: telemetry collection, localhost HTTP server, HA reporter
+- `kioskd` — Root daemon: telemetry collection, localhost HTTP server (`127.0.0.1:9090`), device control
 - `HASmartboard` — UIKit app: WKWebView dashboard, screensaver, network monitor
-- IPC via HTTP on `127.0.0.1:9090` (localhost only)
+- Endpoints: `GET /telemetry`, `GET /health`, `POST /command` (`{"action","value"}`), `POST /wake`
+- App ↔ daemon IPC is HTTP on `127.0.0.1:9090` only
 
 ## HA Sensor Entities
 

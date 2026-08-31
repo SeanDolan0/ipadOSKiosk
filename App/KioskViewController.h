@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
+#import "ScreensaverView.h"
 
-@class ScreensaverView;
 @class NetworkMonitor;
 @class DaemonBridge;
 @class TelemetryRelay;

@@ -1,3 +1,7 @@
+ifndef THEOS
+$(error THEOS is not set. In WSL run: export THEOS=$$HOME/theos)
+endif
+
 THEOS_DEVICE_IP = 192.168.50.53
 THEOS_DEVICE_PORT = 22
 THEOS_DEVICE_USER = root
@@ -19,9 +23,10 @@ HASmartboard_FILES = \
     App/DaemonBridge.m \
     App/TelemetryRelay.m
 
-HASmartboard_CFLAGS = -IApp
-HASmartboard_FRAMEWORKS = UIKit Foundation WebKit CoreGraphics
+HASmartboard_CFLAGS = -IApp -fobjc-arc
+HASmartboard_FRAMEWORKS = UIKit Foundation WebKit CoreGraphics IOKit
 HASmartboard_PRIVATE_FRAMEWORKS = BackBoardServices
+HASmartboard_RESOURCE_FILES = HASmartboard/Info.plist
 
 include $(THEOS_MAKE_PATH)/application.mk
 

@@ -1,15 +1,20 @@
 #import "TelemetryCollector.h"
-#import <IOKit/IOKitLib.h>
+#import <Foundation/Foundation.h>
 #import <sys/sysctl.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
-#include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <syslog.h>
+
+// IOKit PowerSources declarations (headers not in iOS SDK, symbols in IOKit.tbd)
+extern CFTypeRef IOPSCopyPowerSourcesInfo(void);
+extern CFArrayRef IOPSCopyPowerSourcesList(CFTypeRef blob);
+extern CFDictionaryRef IOPSGetPowerSourceDescription(CFTypeRef blob, CFTypeRef source);
 
 // MobileWiFi extern declarations (private framework, no headers in SDK)
 extern void *WiFiManagerClientCreate(void *allocator);
@@ -26,58 +31,33 @@ extern int32_t WiFiNetworkGetNoise(void *network);
 static int collectBattery(TelemetrySnapshot *s) {
     CFTypeRef info = IOPSCopyPowerSourcesInfo();
     if (!info) return -1;
-
     CFArrayRef sources = IOPSCopyPowerSourcesList(info);
-    if (!sources || CFArrayGetCount(sources) == 0) {
-        if (sources) CFRelease(sources);
-        CFRelease(info);
-        return -1;
-    }
-
+    if (!sources) { CFRelease(info); return -1; }
+    if (CFArrayGetCount(sources) == 0) { CFRelease(sources); CFRelease(info); return -1; }
     CFDictionaryRef desc = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(sources, 0));
-    if (!desc) {
-        CFRelease(sources);
-        CFRelease(info);
-        return -1;
+    if (!desc || CFGetTypeID(desc) != CFDictionaryGetTypeID()) {
+        CFRelease(sources); CFRelease(info); return -1;
     }
-
+    // Use runtime-created CFString keys to avoid CFSTR linker issues
+    CFStringRef capKey = CFStringCreateWithCString(NULL, "Current Capacity", kCFStringEncodingMacRoman);
+    CFStringRef maxKey = CFStringCreateWithCString(NULL, "Max Capacity", kCFStringEncodingMacRoman);
+    CFStringRef cycKey = CFStringCreateWithCString(NULL, "Cycle Count", kCFStringEncodingMacRoman);
     CFNumberRef val;
-
-    val = CFDictionaryGetValue(desc, CFSTR(kIOPSCurrentCapacityKey));
-    if (val) CFNumberGetValue(val, kCFNumberIntType, &s->batteryLevel);
-
-    val = CFDictionaryGetValue(desc, CFSTR(kIOPSMaxCapacityKey));
+    val = (CFNumberRef)CFDictionaryGetValue(desc, capKey);
+    if (val && CFGetTypeID(val) == CFNumberGetTypeID())
+        CFNumberGetValue(val, kCFNumberIntType, &s->batteryLevel);
+    val = (CFNumberRef)CFDictionaryGetValue(desc, maxKey);
     int maxCap = 0;
-    if (val) CFNumberGetValue(val, kCFNumberIntType, &maxCap);
-    if (maxCap > 0 && s->batteryLevel > 0) {
+    if (val && CFGetTypeID(val) == CFNumberGetTypeID())
+        CFNumberGetValue(val, kCFNumberIntType, &maxCap);
+    if (maxCap > 0 && s->batteryLevel > 0)
         s->batteryHealthPct = (int)((float)maxCap / 100.0f * 100.0f);
-    }
-
-    val = CFDictionaryGetValue(desc, CFSTR(kIOPSCycleCountKey));
-    if (val) CFNumberGetValue(val, kCFNumberIntType, &s->batteryCycles);
-
-    // Temperature from IORegistry charger node (0.1°C units)
-    io_registry_entry_t charger = IORegistryEntryFromPath(
-        kIOMasterPortDefault,
-        "IOService:/AppleARMPE/charger"
-    );
-    if (charger) {
-        CFMutableDictionaryRef props = NULL;
-        IORegistryEntryCreateCFProperties(charger, &props, kCFAllocatorDefault, 0);
-        if (props) {
-            CFDictionaryRef batteryInfo = CFDictionaryGetValue(props, CFSTR("IOBatteryInfo"));
-            if (batteryInfo) {
-                CFNumberRef temp = CFDictionaryGetValue(batteryInfo, CFSTR("Temperature"));
-                if (temp) CFNumberGetValue(temp, kCFNumberIntType, &s->batteryTempDeciC);
-
-                CFNumberRef volt = CFDictionaryGetValue(batteryInfo, CFSTR("Voltage"));
-                if (volt) CFNumberGetValue(volt, kCFNumberIntType, &s->batteryVoltageMV);
-            }
-            CFRelease(props);
-        }
-        IOObjectRelease(charger);
-    }
-
+    val = (CFNumberRef)CFDictionaryGetValue(desc, cycKey);
+    if (val && CFGetTypeID(val) == CFNumberGetTypeID())
+        CFNumberGetValue(val, kCFNumberIntType, &s->batteryCycles);
+    CFRelease(capKey);
+    CFRelease(maxKey);
+    CFRelease(cycKey);
     CFRelease(sources);
     CFRelease(info);
     return 0;
@@ -86,35 +66,18 @@ static int collectBattery(TelemetrySnapshot *s) {
 #pragma mark - WiFi (MobileWiFi.framework)
 
 static int collectWiFi(TelemetrySnapshot *s) {
-    void *manager = WiFiManagerClientCreate(kCFAllocatorDefault);
+    void *manager = WiFiManagerClientCreate(NULL);
     if (!manager) return -1;
-
     void *network = WiFiManagerClientCopyCurrentNetwork(manager);
-    if (!network) {
-        CFRelease(manager);
-        return -1;
-    }
-
+    if (!network) return -1;
     s->wifiRSSI = WiFiNetworkGetRSSI(network);
-
     const char *ssid = WiFiNetworkGetSSID(network);
-    if (ssid) {
-        strncpy(s->wifiSSID, ssid, sizeof(s->wifiSSID) - 1);
-        s->wifiSSID[sizeof(s->wifiSSID) - 1] = '\0';
-    }
-
+    if (ssid) { strncpy(s->wifiSSID, ssid, sizeof(s->wifiSSID) - 1); s->wifiSSID[sizeof(s->wifiSSID) - 1] = '\0'; }
     const char *bssid = WiFiNetworkGetBSSID(network);
-    if (bssid) {
-        strncpy(s->wifiBSSID, bssid, sizeof(s->wifiBSSID) - 1);
-        s->wifiBSSID[sizeof(s->wifiBSSID) - 1] = '\0';
-    }
-
+    if (bssid) { strncpy(s->wifiBSSID, bssid, sizeof(s->wifiBSSID) - 1); s->wifiBSSID[sizeof(s->wifiBSSID) - 1] = '\0'; }
     s->wifiChannel = (int)WiFiNetworkGetChannel(network);
     s->wifiLinkSpeed = (int)WiFiNetworkGetLinkSpeed(network);
     s->wifiNoise = WiFiNetworkGetNoise(network);
-
-    CFRelease(network);
-    CFRelease(manager);
     return 0;
 }
 
@@ -123,7 +86,6 @@ static int collectWiFi(TelemetrySnapshot *s) {
 static int collectStorage(TelemetrySnapshot *s) {
     struct statvfs buf;
     if (statvfs("/", &buf) != 0) return -1;
-
     s->storageFreeBytes = (long long)buf.f_bavail * buf.f_frsize;
     s->storageTotalBytes = (long long)buf.f_blocks * buf.f_frsize;
     return 0;
@@ -134,14 +96,10 @@ static int collectStorage(TelemetrySnapshot *s) {
 static int collectMemory(TelemetrySnapshot *s) {
     vm_size_t pageSize = 0;
     host_page_size(mach_host_self(), &pageSize);
-
     vm_statistics64_data_t stats;
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
-    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
-                          (host_info64_t)&stats, &count) != KERN_SUCCESS) {
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t)&stats, &count) != KERN_SUCCESS)
         return -1;
-    }
-
     s->memoryFreeBytes = (long long)stats.free_count * pageSize;
     s->memoryActiveBytes = (long long)stats.active_count * pageSize;
     return 0;
@@ -152,17 +110,14 @@ static int collectMemory(TelemetrySnapshot *s) {
 static int collectNetwork(TelemetrySnapshot *s) {
     struct ifaddrs *interfaces;
     if (getifaddrs(&interfaces) != 0) return -1;
-
     for (struct ifaddrs *iface = interfaces; iface; iface = iface->ifa_next) {
-        if (iface->ifa_name && strcmp(iface->ifa_name, "en0") == 0 &&
-            iface->ifa_data) {
+        if (iface->ifa_name && strcmp(iface->ifa_name, "en0") == 0 && iface->ifa_data) {
             struct if_data *data = (struct if_data *)iface->ifa_data;
             s->netRxBytes = data->ifi_ibytes;
             s->netTxBytes = data->ifi_obytes;
             break;
         }
     }
-
     freeifaddrs(interfaces);
     return 0;
 }
@@ -173,9 +128,7 @@ static int collectUptime(TelemetrySnapshot *s) {
     struct timeval boottime;
     int mib[2] = { CTL_KERN, KERN_BOOTTIME };
     size_t len = sizeof(boottime);
-
     if (sysctl(mib, 2, &boottime, &len, NULL, 0) != 0) return -1;
-
     time_t now = time(NULL);
     s->uptimeSeconds = (int)(now - boottime.tv_sec);
     return 0;
@@ -198,7 +151,6 @@ int TelemetryCollect(TelemetrySnapshot *snapshot) {
 char *TelemetrySnapshotToJSON(const TelemetrySnapshot *s) {
     char *json = malloc(2048);
     if (!json) return NULL;
-
     snprintf(json, 2048,
         "{"
         "\"battery\":{\"level\":%d,\"current\":%d,\"temp\":%d,"

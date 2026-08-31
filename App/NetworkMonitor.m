@@ -1,6 +1,7 @@
 #import "NetworkMonitor.h"
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import <SystemConfiguration/SCNetworkReachability.h>
+#import <arpa/inet.h>
 
 @interface NetworkMonitor ()
 @property (nonatomic, assign) SCNetworkReachabilityRef reachability;

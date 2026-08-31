@@ -9,12 +9,12 @@ kioskd_FILES = \
     main.m \
     TelemetryCollector.m \
     HTTPServer.m \
-    HAReporter.m \
     DeviceControl.m
 
-kioskd_CFLAGS = -I.
+kioskd_CFLAGS = -I. -fobjc-arc
 kioskd_FRAMEWORKS = IOKit Foundation
-kioskd_PRIVATE_FRAMEWORKS = MobileWiFi BackBoardServices
+kioskd_PRIVATE_FRAMEWORKS = MobileWiFi
+kioskd_LDFLAGS = -Wl,-undefined,dynamic_lookup
 
 kioskd_INSTALL_PATH = /Library/Application\ Support/HASmartboard
 

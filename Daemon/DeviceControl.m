@@ -1,10 +1,17 @@
 #import "DeviceControl.h"
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/syslog.h>
+
+// RB_AUTOBOOT not in iOS SDK headers, defined in BSD <sys/reboot.h>
+#ifndef RB_AUTOBOOT
+#define RB_AUTOBOOT 0x0405
+#endif
 
 // BackBoardServices — brightness control
 extern void BBSetBrightness(float value);
@@ -59,7 +66,7 @@ static void muteVolume(const char *value) {
 
 static void toggleWiFi(const char *value) {
     int power = (strcmp(value, "true") == 0) ? 1 : 0;
-    void *manager = WiFiManagerClientCreate(kCFAllocatorDefault);
+    void *manager = WiFiManagerClientCreate(NULL);
     if (manager) {
         WiFiManagerClientSetPower(manager, power);
         CFRelease(manager);

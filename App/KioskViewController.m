@@ -4,10 +4,8 @@
 #import "DaemonBridge.h"
 #import "TelemetryRelay.h"
 
-#define HA_BASE_URL  @"http://192.168.50.150:8123"
-#define HA_TOKEN     @"YOUR_LONG_LIVED_ACCESS_TOKEN_HERE"
-#define DASHBOARD_PATH @"/lovelace/0"
 #define TELEMETRY_INTERVAL 30
+#define PREFS_PATH @"/var/mobile/Library/Preferences/com.hasmartboard.plist"
 
 @implementation KioskViewController {
     WKWebView *_webView;
@@ -19,16 +17,30 @@
     NSTimer *_idleTimer;
     BOOL _screensaverActive;
     BOOL _isConnected;
+    NSString *_haBaseURL;
+    NSString *_haToken;
+    NSString *_dashboardPath;
+    UILabel *_orientationDiagnostics;
+    NSUInteger _layoutCount;
+    NSUInteger _transitionCount;
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor blackColor];
 
+    [self loadHAConfig];
+
     _networkMonitor = [[NetworkMonitor alloc] init];
     _daemonBridge = [[DaemonBridge alloc] init];
-    _telemetryRelay = [[TelemetryRelay alloc] initWithBaseURL:HA_BASE_URL
-                                                       token:HA_TOKEN];
+    _telemetryRelay = [[TelemetryRelay alloc] initWithBaseURL:_haBaseURL
+                                                       token:_haToken];
+    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(deviceOrientationDidChange:)
+                                                 name:UIDeviceOrientationDidChangeNotification
+                                               object:nil];
+    [self setupOrientationDiagnostics];
 
     [self setupWebView];
 
@@ -55,6 +67,111 @@
     [self loadDashboard];
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self updateOrientationDiagnostics];
+}
+
+- (void)deviceOrientationDidChange:(NSNotification *)notification {
+    (void)notification;
+    [self updateOrientationDiagnostics];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    _layoutCount++;
+    _webView.frame = self.view.bounds;
+    _screensaver.frame = self.view.bounds;
+    [self updateOrientationDiagnostics];
+}
+
+- (void)setupOrientationDiagnostics {
+    _orientationDiagnostics = [[UILabel alloc] initWithFrame:CGRectZero];
+    _orientationDiagnostics.numberOfLines = 0;
+    _orientationDiagnostics.textColor = [UIColor whiteColor];
+    _orientationDiagnostics.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
+    _orientationDiagnostics.font = [UIFont systemFontOfSize:12.0];
+    _orientationDiagnostics.textAlignment = NSTextAlignmentLeft;
+    _orientationDiagnostics.layer.cornerRadius = 4.0;
+    _orientationDiagnostics.clipsToBounds = YES;
+    _orientationDiagnostics.hidden = NO;
+    [self.view addSubview:_orientationDiagnostics];
+}
+
+- (NSString *)orientationName:(UIDeviceOrientation)orientation {
+    switch (orientation) {
+        case UIDeviceOrientationPortrait: return @"Portrait";
+        case UIDeviceOrientationPortraitUpsideDown: return @"PortraitUpsideDown";
+        case UIDeviceOrientationLandscapeLeft: return @"LandscapeLeft";
+        case UIDeviceOrientationLandscapeRight: return @"LandscapeRight";
+        case UIDeviceOrientationFaceUp: return @"FaceUp";
+        case UIDeviceOrientationFaceDown: return @"FaceDown";
+        default: return @"Unknown";
+    }
+}
+
+- (NSString *)interfaceOrientationName:(UIInterfaceOrientation)orientation {
+    switch (orientation) {
+        case UIInterfaceOrientationPortrait: return @"Portrait";
+        case UIInterfaceOrientationPortraitUpsideDown: return @"PortraitUpsideDown";
+        case UIInterfaceOrientationLandscapeLeft: return @"LandscapeLeft";
+        case UIInterfaceOrientationLandscapeRight: return @"LandscapeRight";
+        default: return @"Unknown";
+    }
+}
+
+- (void)updateOrientationDiagnostics {
+    if (!_orientationDiagnostics) return;
+
+    UIInterfaceOrientation statusBarOrientation =
+        [UIApplication sharedApplication].statusBarOrientation;
+    NSString *deviceOrientation = [self orientationName:[UIDevice currentDevice].orientation];
+    NSString *statusOrientation = [self interfaceOrientationName:statusBarOrientation];
+    UIInterfaceOrientationMask supported = [self supportedInterfaceOrientations];
+
+    _orientationDiagnostics.text = [NSString stringWithFormat:
+        @"Device: %@\nStatus: %@\nView: %.0f x %.0f\nLayout: %lu  Transition: %lu\nMask: 0x%lx",
+        deviceOrientation,
+        statusOrientation,
+        self.view.bounds.size.width,
+        self.view.bounds.size.height,
+        (unsigned long)_layoutCount,
+        (unsigned long)_transitionCount,
+        (unsigned long)supported];
+    [_orientationDiagnostics sizeToFit];
+    CGRect frame = _orientationDiagnostics.frame;
+    frame.origin = CGPointMake(8.0, 8.0);
+    frame.size.width += 12.0;
+    frame.size.height += 8.0;
+    _orientationDiagnostics.frame = frame;
+    [self.view bringSubviewToFront:_orientationDiagnostics];
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    _transitionCount++;
+
+    [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> transitionContext) {
+        self->_webView.frame = (CGRect){CGPointZero, size};
+        self->_screensaver.frame = (CGRect){CGPointZero, size};
+        [self.view layoutIfNeeded];
+    } completion:nil];
+}
+
+#pragma mark - HA Configuration
+
+- (void)loadHAConfig {
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
+    NSDictionary *haConfig = prefs[@"ha"];
+    
+    _haBaseURL = haConfig[@"url"] ?: @"http://192.168.50.150:8123";
+    _haToken = haConfig[@"token"] ?: @"";
+    _dashboardPath = haConfig[@"dashboardPath"] ?: @"/lovelace/0";
+    
+    NSLog(@"KioskViewController: Loaded HA config - URL: %@, Dashboard: %@", _haBaseURL, _dashboardPath);
+}
+
 #pragma mark - WKWebView Setup
 
 - (void)setupWebView {
@@ -63,12 +180,16 @@
     WKUserContentController *ucc = [[WKUserContentController alloc] init];
     [ucc addScriptMessageHandler:self name:@"kiosk"];
 
-    NSString *authJS = [NSString stringWithFormat:
-        @"window._kioskToken = '%@';", HA_TOKEN];
+NSString *escapedToken = [_haToken stringByReplacingOccurrencesOfString:@"\\"
+                                                                withString:@"\\\\"];
+escapedToken = [escapedToken stringByReplacingOccurrencesOfString:@"'"
+                                                           withString:@"\\'"];
+NSString *authJS = [NSString stringWithFormat:
+    @"window._kioskToken = '%@';", escapedToken];
     WKUserScript *authScript = [[WKUserScript alloc]
         initWithSource:authJS
          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
-      forMainFrameOnly:YES];
+       forMainFrameOnly:YES];
     [ucc addUserScript:authScript];
 
     config.userContentController = ucc;
@@ -79,13 +200,13 @@
     _webView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                 UIViewAutoresizingFlexibleHeight;
 
-    NSString *interceptJS =
+    NSString *interceptJS = [NSString stringWithFormat:
         @"(function() {"
         "  var origFetch = window.fetch;"
         "  window.fetch = function(url, opts) {"
         "    opts = opts || {};"
         "    opts.headers = opts.headers || {};"
-        "    opts.headers['Authorization'] = 'Bearer " HA_TOKEN "';"
+        "    opts.headers['Authorization'] = 'Bearer %@';"
         "    return origFetch(url, opts);"
         "};"
         "  var origXHR = XMLHttpRequest.prototype.open;"
@@ -94,14 +215,16 @@
         "    return origXHR.apply(this, arguments);"
         "};"
         "  XMLHttpRequest.prototype.send = function() {"
-        "    this.setRequestHeader('Authorization', 'Bearer " HA_TOKEN "');"
+        "    this.setRequestHeader('Authorization', 'Bearer %@');"
         "    return XMLHttpRequest.prototype.send.apply(this, arguments);"
         "};"
-        "})();";
+        "})();", escapedToken, escapedToken];
+    interceptJS = [interceptJS stringByReplacingOccurrencesOfString:@"******"
+                                                           withString:[NSString stringWithFormat:@"Bearer %@", escapedToken]];
     WKUserScript *interceptScript = [[WKUserScript alloc]
         initWithSource:interceptJS
          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
-      forMainFrameOnly:YES];
+       forMainFrameOnly:YES];
     [ucc addUserScript:interceptScript];
 
     [self.view insertSubview:_webView atIndex:0];
@@ -110,7 +233,7 @@
 #pragma mark - Dashboard Loading
 
 - (void)loadDashboard {
-    NSString *urlString = [NSString stringWithFormat:@"%@%@", HA_BASE_URL, DASHBOARD_PATH];
+    NSString *urlString = [NSString stringWithFormat:@"%@%@", _haBaseURL, _dashboardPath];
     NSURL *url = [NSURL URLWithString:urlString];
     NSURLRequest *request = [NSURLRequest requestWithURL:url];
     [_webView loadRequest:request];
@@ -215,21 +338,23 @@
 
 - (void)userContentController:(WKUserContentController *)ucc
       didReceiveScriptMessage:(WKScriptMessage *)message {
-    if ([message.name isEqualToString:@"kiosk"]) {
-        NSDictionary *body = message.body;
-        NSString *type = body[@"type"];
+    if (![message.name isEqualToString:@"kiosk"]) return;
+    if (![message.body isKindOfClass:[NSDictionary class]]) return;
+    
+    NSDictionary *body = message.body;
+    NSString *type = body[@"type"];
+    if (!type) return;
 
-        if ([type isEqualToString:@"setBrightness"]) {
-            float value = [body[@"value"] floatValue];
-            [self postCommand:@"setBrightness" value:[NSString stringWithFormat:@"%.2f", value]];
-        }
-        else if ([type isEqualToString:@"setVolume"]) {
-            float value = [body[@"value"] floatValue];
-            [self postCommand:@"setVolume" value:[NSString stringWithFormat:@"%.2f", value]];
-        }
-        else if ([type isEqualToString:@"wake"]) {
-            [self dismissScreensaver];
-        }
+    if ([type isEqualToString:@"setBrightness"]) {
+        float value = [body[@"value"] floatValue];
+        [self postCommand:@"setBrightness" value:[NSString stringWithFormat:@"%.2f", value]];
+    }
+    else if ([type isEqualToString:@"setVolume"]) {
+        float value = [body[@"value"] floatValue];
+        [self postCommand:@"setVolume" value:[NSString stringWithFormat:@"%.2f", value]];
+    }
+    else if ([type isEqualToString:@"wake"]) {
+        [self dismissScreensaver];
     }
 }
 
@@ -258,6 +383,7 @@
     [_telemetryTimer invalidate];
     [_idleTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
 }
 
 @end
