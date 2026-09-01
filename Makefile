@@ -20,8 +20,7 @@ HASmartboard_FILES = \
     App/KioskViewController.m \
     App/ScreensaverView.m \
     App/NetworkMonitor.m \
-    App/DaemonBridge.m \
-    App/TelemetryRelay.m
+    App/DaemonBridge.m
 
 HASmartboard_CFLAGS = -IApp -fobjc-arc
 HASmartboard_FRAMEWORKS = UIKit Foundation WebKit CoreGraphics IOKit

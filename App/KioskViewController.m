@@ -2,9 +2,7 @@
 #import "ScreensaverView.h"
 #import "NetworkMonitor.h"
 #import "DaemonBridge.h"
-#import "TelemetryRelay.h"
 
-#define TELEMETRY_INTERVAL 30
 #define PREFS_PATH @"/var/mobile/Library/Preferences/com.hasmartboard.plist"
 
 @implementation KioskViewController {
@@ -12,8 +10,7 @@
     ScreensaverView *_screensaver;
     NetworkMonitor *_networkMonitor;
     DaemonBridge *_daemonBridge;
-    TelemetryRelay *_telemetryRelay;
-    NSTimer *_telemetryTimer;
+    NSTimer *_wakeTimer;
     NSTimer *_idleTimer;
     BOOL _screensaverActive;
     BOOL _isConnected;
@@ -30,8 +27,6 @@
 
     _networkMonitor = [[NetworkMonitor alloc] init];
     _daemonBridge = [[DaemonBridge alloc] init];
-    _telemetryRelay = [[TelemetryRelay alloc] initWithBaseURL:_haBaseURL
-                                                       token:_haToken];
 
     [self setupWebView];
 
@@ -48,11 +43,11 @@
     };
     [_networkMonitor start];
 
-    _telemetryTimer = [NSTimer scheduledTimerWithTimeInterval:TELEMETRY_INTERVAL
-                                                      target:self
-                                                    selector:@selector(fetchAndRelayTelemetry)
-                                                    userInfo:nil
-                                                     repeats:YES];
+    _wakeTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
+                                                  target:self
+                                                selector:@selector(checkWake)
+                                                userInfo:nil
+                                                 repeats:YES];
 
     [self resetIdleTimer];
     [self loadDashboard];
@@ -209,18 +204,14 @@ NSString *authJS = [NSString stringWithFormat:
     }
 }
 
-#pragma mark - Telemetry
+#pragma mark - Wake Polling
 
-- (void)fetchAndRelayTelemetry {
-    [_daemonBridge fetchTelemetryWithCompletion:^(NSDictionary *telemetry) {
-        if (telemetry) {
-            [self->_telemetryRelay relayTelemetry:telemetry];
-        }
-    }];
-
+- (void)checkWake {
     [_daemonBridge checkWakeWithCompletion:^(BOOL shouldWake) {
         if (shouldWake && self->_screensaverActive) {
-            [self dismissScreensaver];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self dismissScreensaver];
+            });
         }
     }];
 }
@@ -365,7 +356,7 @@ NSString *authJS = [NSString stringWithFormat:
 }
 
 - (void)dealloc {
-    [_telemetryTimer invalidate];
+    [_wakeTimer invalidate];
     [_idleTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
