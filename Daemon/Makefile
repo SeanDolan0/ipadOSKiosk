@@ -9,6 +9,7 @@ kioskd_FILES = \
     main.m \
     KioskConfig.m \
     MQTTClient.c \
+    MQTTTelemetry.c \
     TelemetryCollector.m \
     HTTPServer.m \
     DeviceControl.m
