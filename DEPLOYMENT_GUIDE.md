@@ -138,7 +138,26 @@ Full plist schema (`config.plist.example` in the repo):
 
 Write it with `plutil -create` / `plutil -insert` on the device, or `pscp` a complete XML plist from Windows and `chmod 644`. Save a copy in a safe place — the plist is the only copy of the HA token.
 
-The daemon **never talks to HA directly** (localhost-only bind). The app is the bridge: every 30s it polls `GET /telemetry`, and `App/TelemetryRelay.m` POSTs each field to `POST /api/states/sensor.kiosk_*` using the plist token. If HA logs "invalid authentication" from `sedol's-iPad`, the plist token is missing/vrong — fix the plist, relaunch the app, and check whether HA IP-banned the iPad after repeated failures.
+The daemon **never talks to HA REST API**. The app used to relay telemetry via REST but this is now removed (so `/var/log/hasmartboard.log` no longer shows relay errors).
+
+## MQTT Telemetry
+
+Telemetry is published directly by `kioskd` over MQTT to a Mosquitto broker on the HA instance.
+
+1. **HA Setup**: Install Mosquitto add-on in HA, create a `kiosk` user, and add the MQTT integration.
+2. **Device Config**: Write the `mqtt` block to the plist:
+```bash
+plutil -insert mqtt -xml '<dict/>' /var/mobile/Library/Preferences/com.hasmartboard.plist; \
+plutil -insert mqtt.enabled -bool YES /var/mobile/Library/Preferences/com.hasmartboard.plist; \
+plutil -insert mqtt.host -string 192.168.50.150 /var/mobile/Library/Preferences/com.hasmartboard.plist; \
+plutil -insert mqtt.port -integer 1883 /var/mobile/Library/Preferences/com.hasmartboard.plist; \
+plutil -insert mqtt.username -string kiosk /var/mobile/Library/Preferences/com.hasmartboard.plist; \
+plutil -insert mqtt.password -string YOUR_PASSWORD /var/mobile/Library/Preferences/com.hasmartboard.plist
+```
+3. **Verification**: 
+```bash
+mosquitto_sub -h 192.168.50.150 -t 'kiosk/#' -u kiosk -P YOUR_PASSWORD -v
+```
 
 ## Known limitations (have been hit; don't burn time re-investigating)
 

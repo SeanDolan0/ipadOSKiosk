@@ -30,12 +30,12 @@ Everything must be built on the iPad with Theos. Cross-compiling elsewhere and c
   - `GET 127.0.0.1:9090/health`
   - `POST /command` — JSON body `{"action": "...", "value": "..."}`. Actions in `Daemon/DeviceControl.m`: `setBrightness`, `setVolume`, `muteVolume`, `toggleWiFi`, `toggleBluetooth`, `setDND`, `lockOrientation`, `reboot`, `relaunchApp`.
   - `POST /wake` — stubbed (`DaemonBridge` always returns `NO`; not wired to HA).
-- App → daemon IPC: `App/KioskViewController` polls `127.0.0.1:9090/telemetry` via `App/DaemonBridge.m` and hands the dict to `App/TelemetryRelay.m`, which is the only path to HA — it POSTs the `sensor.kiosk_*` entities to HA's REST API every 30s. The daemon binds localhost only and **never talks to HA directly**.
-- ⚠️ `Daemon/HAReporter.h/.m` is **dead code** — a leftover from the unimplemented MQTT plan. It is NOT in `Daemon/Makefile`'s `kioskd_FILES` and is never called from `Daemon/main.m`, so it is not compiled into the running daemon. Don't "fix" it or wire it up; the live HA bridge is the app-side `TelemetryRelay` (see `TODO.md` Feature 1 if MQTT migration is the goal).
+- App → daemon IPC: `App/KioskViewController` polls `127.0.0.1:9090/health` (via `/wake` stub) for screensaver wake. `App/TelemetryRelay.m` is **removed**.
+- Telemetry path: `kioskd → MQTT → HA`. The daemon runs a hand-rolled MQTT client (`Daemon/MQTTClient.c`, BSD sockets, QoS 0 publish-only, dependency-free) that publishes discovery and state to the HA broker every 30s (config `mqtt.interval`), with a 1–30s reconnect backoff and LWT on `kiosk/status`.
 
 ## Configuration
 
-- App config is read at launch from `/var/mobile/Library/Preferences/com.hasmartboard.plist` (`ha.url`, `ha.token`, `ha.dashboardPath`; screensaver keys) in `App/KioskViewController.m:loadHAConfig`; code defaults in that method are the fallback (URL `http://192.168.50.150:8123`, dashboard `/bedroom-kiosk/0`, empty token). **Never commit a real HA token** — the real one lives only in the device plist (schema: `config.plist.example`).
+- App config is read at launch from `/var/mobile/Library/Preferences/com.hasmartboard.plist` (`ha.url`, `ha.token`, `ha.dashboardPath`; screensaver keys) in `App/KioskViewController.m:loadHAConfig`; code defaults in that method are the fallback (URL `http://192.168.50.150:8123`, dashboard `/bedroom-kiosk/0`, empty token). **Never commit a real HA token or MQTT password** — they live only in the device plist (schema: `config.plist.example`).
 
 ## Conventions
 

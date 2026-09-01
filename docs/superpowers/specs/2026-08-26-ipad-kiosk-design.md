@@ -109,32 +109,13 @@ POST /command
 
 ### HA Telemetry Reporter
 
-The daemon also pushes telemetry to HA as sensor states:
+The daemon publishes telemetry to HA via MQTT (QoS 0) to a Mosquitto broker:
 
-```
-POST http://192.168.50.150:8123/api/states/sensor.kiosk_battery_level
-Headers:
-  Authorization: Bearer <long-lived-token>
-  Content-Type: application/json
-Body: {"state":"87","attributes":{"unit_of_measurement":"%","friendly_name":"Kiosk Battery Level"}}
-```
+- The daemon connects with a LWT of `offline` on topic `kiosk/status`
+- It publishes MQTT discovery configs to `homeassistant/sensor/kiosk_<entity>/config`
+- Every 30s, it publishes state payload to `kiosk/sensor/<entity>/state`
 
-One POST per sensor entity, every 30s. Entities:
-- `sensor.kiosk_battery_level`
-- `sensor.kiosk_battery_current`
-- `sensor.kiosk_battery_temp`
-- `sensor.kiosk_battery_health`
-- `sensor.kiosk_battery_cycles`
-- `sensor.kiosk_wifi_rssi`
-- `sensor.kiosk_wifi_ssid`
-- `sensor.kiosk_wifi_link_speed`
-- `sensor.kiosk_storage_free`
-- `sensor.kiosk_memory_free`
-- `sensor.kiosk_uptime`
-- `sensor.kiosk_network_rx_bytes`
-- `sensor.kiosk_network_tx_bytes`
-
-Retry logic: 3 attempts, exponential backoff (1s, 2s, 4s). Log failures to syslog.
+See `2026-09-01-mqtt-telemetry-design.md` for full MQTT topic schemas and configuration.
 
 ### Device Control (via POST /command from app)
 
@@ -234,7 +215,6 @@ DISCONNECTED (detected when monitor fails):
 RECONNECTING (WiFi back, HA reachable):
   - Show overlay: "Reconnecting..."
   - Reload WKWebView
-  - Resume telemetry relay
   - Transition back to CONNECTED
 ```
 
@@ -242,7 +222,7 @@ RECONNECTING (WiFi back, HA reachable):
 
 1. `application:didFinishLaunchingWithOptions:` → disable idle timer, set full-screen, configure WKWebView, load dashboard
 2. `applicationDidBecomeActive:` → resume monitoring
-3. `applicationWillResignActive:` → pause telemetry relay (daemon keeps collecting)
+3. `applicationWillResignActive:` → pause active view components
 4. `applicationDidEnterBackground:` → `IOPMAssertion` to prevent sleep
 5. Crash recovery handled by launchd `KeepAlive` — app restarts within 5s
 

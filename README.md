@@ -6,7 +6,7 @@ Home Assistant kiosk dashboard for jailbroken iPadOS 12.5.8 (iPad Mini 2).
 
 - Displays HA Lovelace dashboard full-screen via WKWebView
 - Collects system telemetry (battery, WiFi, storage, memory) via root daemon
-- Reports telemetry as HA sensor entities
+- Reports telemetry as HA sensor entities over MQTT
 - Configurable screensaver (clock, photo carousel, dimmed display)
 - Network resilience with auto-reconnect
 - HA can control brightness, volume, WiFi, Bluetooth, DND
@@ -17,7 +17,7 @@ Home Assistant kiosk dashboard for jailbroken iPadOS 12.5.8 (iPad Mini 2).
 - Jailbroken via checkra1n or Amethyst
 - OpenSSH (for reaching the device)
 - **Theos installed on the iPad** with an arm64 iOS 12 SDK — all builds run on-device
-- Home Assistant instance on local network
+- Home Assistant instance on local network with Mosquitto MQTT broker
 
 ## Build on the iPad (the only supported method)
 
@@ -44,14 +44,23 @@ The app is opened from the home screen by SpringBoard. It is intentionally **not
 
 ## Configuration
 
-- Home Assistant URL/token/dashboard: read from `/var/mobile/Library/Preferences/com.hasmartboard.plist`
-  (`ha.url`, `ha.token`, `ha.dashboardPath`) when the app starts, with code defaults in
-  `App/KioskViewController.m:loadHAConfig` (URL `http://192.168.50.150:8123`, dashboard `/bedroom-kiosk/0`).
-  The `ha.token` is a Home Assistant **long-lived access token**; it lives only in the device plist,
-  never in git. Full schema: `config.plist.example`.
+- Home Assistant URL/dashboard: read from `/var/mobile/Library/Preferences/com.hasmartboard.plist`
+  (`ha.url`, `ha.dashboardPath`) when the app starts. The `ha.token` is injected into the WKWebView for dashboard login, but telemetry no longer uses it.
+- MQTT config for telemetry: read from the `mqtt` block in the same plist by `kioskd`. Broker defaults to `192.168.50.150:1883`. The daemon publishes MQTT discovery and state every `interval` (30s) on topic `kiosk/sensor/<id>/state`.
 - Screensaver settings (same plist):
 
 ```xml
+<key>mqtt</key>
+<dict>
+    <key>enabled</key><true/>
+    <key>host</key><string>192.168.50.150</string>
+    <key>port</key><integer>1883</integer>
+    <key>user</key><string>kiosk</string>
+    <key>pass</key><string>YOUR_MQTT_PASSWORD_HERE</string>
+    <key>prefix</key><string>kiosk</string>
+    <key>clientId</key><string>hasmartboard-ipad</string>
+    <key>interval</key><integer>30</integer>
+</dict>
 <key>screensaver</key>
 <dict>
     <key>mode</key><string>clock</string>  <!-- clock, photo -->
