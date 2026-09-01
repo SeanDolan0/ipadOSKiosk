@@ -8,6 +8,7 @@
 #include "HTTPServer.h"
 #include "TelemetryCollector.h"
 #include "DeviceControl.h"
+#include "KioskConfig.h"
 
 #define HTTP_PORT 9090
 #define TELEMETRY_INTERVAL 30
@@ -58,6 +59,15 @@ int main(int argc, char *argv[]) {
     httpConfig.commandHandler = onCommand;
     httpConfig.wakeHandler = onWake;
     httpConfig.callbackContext = NULL;
+
+    KioskMQTTConfig mqttCfg;
+    KioskConfigLoadMQTT(&mqttCfg);
+    if (mqttCfg.enabled) {
+        syslog(LOG_NOTICE, "kioskd: MQTT enabled host=%s port=%d prefix=%s interval=%d",
+               mqttCfg.host, mqttCfg.port, mqttCfg.prefix, mqttCfg.interval);
+    } else {
+        syslog(LOG_NOTICE, "kioskd: MQTT disabled (no mqtt block or enabled=false)");
+    }
 
     int rc = HTTPServerStart(&httpConfig);
     if (rc != 0) {

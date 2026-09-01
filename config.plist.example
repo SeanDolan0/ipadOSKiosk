@@ -12,6 +12,25 @@
         <key>dashboardPath</key>
         <string>/lovelace/0</string>
     </dict>
+    <key>mqtt</key>
+    <dict>
+        <key>enabled</key>
+        <true/>
+        <key>host</key>
+        <string>192.168.50.150</string>
+        <key>port</key>
+        <integer>1883</integer>
+        <key>user</key>
+        <string>kiosk</string>
+        <key>pass</key>
+        <string>YOUR_MQTT_PASSWORD_HERE</string>
+        <key>prefix</key>
+        <string>kiosk</string>
+        <key>clientId</key>
+        <string>hasmartboard-ipad</string>
+        <key>interval</key>
+        <integer>30</integer>
+    </dict>
     <key>screensaver</key>
     <dict>
         <key>enabled</key>
