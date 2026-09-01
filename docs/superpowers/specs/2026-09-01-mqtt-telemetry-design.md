@@ -38,8 +38,9 @@ kioskd (root, daemon)
   │                       ─▶ keepalive PINGREQ loop
   │                       ─▶ auto-reconnect w/ backoff
   │
-  └─ HTTPServer (unchanged: 127.0.0.1:9090 /telemetry /health /command /wake)
-        — app still polls telemetry from the daemon (unchanged contract)
+  └─ HTTPServer (unchanged: 127.0.0.1:9090 /health /command /wake; /telemetry kept for
+        the app's own display needs but no longer relayed to HA REST)
+        — app polls /health + /wake; telemetry REST relay removed.
 ```
 
 ### What stays in the app
