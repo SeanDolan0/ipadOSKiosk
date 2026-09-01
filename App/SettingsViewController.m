@@ -275,7 +275,98 @@
 }
 
 - (void)testConnection {
-    // Implemented in Task 2
+    [self.view endEditing:YES];
+    [_activityIndicator startAnimating];
+    _statusLabel.textColor = [UIColor darkGrayColor];
+    _statusLabel.text = @"Testing connection to Home Assistant & kioskd...";
+
+    NSString *haURLString = [_haURLField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *token = [_haTokenField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    if (haURLString.length == 0) {
+        [_activityIndicator stopAnimating];
+        _statusLabel.textColor = [UIColor redColor];
+        _statusLabel.text = @"❌ Home Assistant URL is empty";
+        return;
+    }
+
+    NSString *apiURLString = [NSString stringWithFormat:@"%@/api/", [haURLString stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]]];
+    NSURL *haURL = [NSURL URLWithString:apiURLString];
+    if (!haURL) {
+        [_activityIndicator stopAnimating];
+        _statusLabel.textColor = [UIColor redColor];
+        _statusLabel.text = @"❌ Invalid Home Assistant URL format";
+        return;
+    }
+
+    NSMutableURLRequest *haReq = [NSMutableURLRequest requestWithURL:haURL
+                                                         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                     timeoutInterval:5.0];
+    if (token.length > 0) {
+        [haReq setValue:[NSString stringWithFormat:@"Bearer %@", token] forHTTPHeaderField:@"Authorization"];
+    }
+
+    NSURL *daemonURL = [NSURL URLWithString:@"http://127.0.0.1:9090/health"];
+    NSURLRequest *daemonReq = [NSURLRequest requestWithURL:daemonURL
+                                               cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                           timeoutInterval:3.0];
+
+    __block NSString *haResult = nil;
+    __block BOOL haSuccess = NO;
+    __block NSString *daemonResult = nil;
+    __block BOOL daemonSuccess = NO;
+
+    dispatch_group_t group = dispatch_group_create();
+
+    // 1. HA Test
+    dispatch_group_enter(group);
+    NSURLSessionDataTask *haTask = [[NSURLSession sharedSession]
+        dataTaskWithRequest:haReq
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+            if (error) {
+                haResult = [NSString stringWithFormat:@"❌ HA: %@", error.localizedDescription];
+            } else if (httpResp.statusCode == 200) {
+                haSuccess = YES;
+                haResult = @"✅ HA: Connected (200 OK)";
+            } else if (httpResp.statusCode == 401) {
+                haResult = @"❌ HA: 401 Unauthorized (Check Token)";
+            } else {
+                haResult = [NSString stringWithFormat:@"⚠️ HA: HTTP %ld", (long)httpResp.statusCode];
+            }
+            dispatch_group_leave(group);
+        }];
+    [haTask resume];
+
+    // 2. kioskd Test
+    dispatch_group_enter(group);
+    NSURLSessionDataTask *daemonTask = [[NSURLSession sharedSession]
+        dataTaskWithRequest:daemonReq
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+            if (!error && httpResp.statusCode == 200) {
+                daemonSuccess = YES;
+                daemonResult = @"✅ kioskd: Running";
+            } else {
+                daemonResult = @"⚠️ kioskd: Not responding";
+            }
+            dispatch_group_leave(group);
+        }];
+    [daemonTask resume];
+
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        [self->_activityIndicator stopAnimating];
+        self->_statusLabel.text = [NSString stringWithFormat:@"%@\n%@", haResult, daemonResult];
+        if (haSuccess && daemonSuccess) {
+            self->_statusLabel.textColor = [UIColor colorWithRed:0.0 green:0.5 blue:0.0 alpha:1.0];
+        } else if (haSuccess) {
+            self->_statusLabel.textColor = [UIColor colorWithRed:0.7 green:0.5 blue:0.0 alpha:1.0];
+        } else {
+            self->_statusLabel.textColor = [UIColor redColor];
+        }
+        [self.tableView beginUpdates];
+        [self.tableView endUpdates];
+    });
 }
 
 @end
