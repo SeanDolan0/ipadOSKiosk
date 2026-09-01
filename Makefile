@@ -26,7 +26,7 @@ HASmartboard_FILES = \
 HASmartboard_CFLAGS = -IApp -fobjc-arc
 HASmartboard_FRAMEWORKS = UIKit Foundation WebKit CoreGraphics IOKit
 HASmartboard_PRIVATE_FRAMEWORKS = BackBoardServices
-HASmartboard_RESOURCE_FILES = HASmartboard/Info.plist
+HASmartboard_RESOURCE_FILES = HASmartboard/Info.plist Resources/SwipeNav.js
 
 include $(THEOS_MAKE_PATH)/application.mk
 

@@ -30,7 +30,8 @@ Everything must be built on the iPad with Theos. Cross-compiling elsewhere and c
   - `GET 127.0.0.1:9090/health`
   - `POST /command` — JSON body `{"action": "...", "value": "..."}`. Actions in `Daemon/DeviceControl.m`: `setBrightness`, `setVolume`, `muteVolume`, `toggleWiFi`, `toggleBluetooth`, `setDND`, `lockOrientation`, `reboot`, `relaunchApp`.
   - `POST /wake` — stubbed (`DaemonBridge` always returns `NO`; not wired to HA).
-- App → daemon IPC is `App/DaemonBridge.m` (NSURLSession → `127.0.0.1:9090`); `NetworkMonitor`/`TelemetryRelay` consume it. The daemon binds localhost only and **never talks to HA directly** — `TelemetryRelay` is the bridge, pushing `sensor.kiosk_*` entities to HA's REST API every 30s.
+- App → daemon IPC: `App/KioskViewController` polls `127.0.0.1:9090/telemetry` via `App/DaemonBridge.m` and hands the dict to `App/TelemetryRelay.m`, which is the only path to HA — it POSTs the `sensor.kiosk_*` entities to HA's REST API every 30s. The daemon binds localhost only and **never talks to HA directly**.
+- ⚠️ `Daemon/HAReporter.h/.m` is **dead code** — a leftover from the unimplemented MQTT plan. It is NOT in `Daemon/Makefile`'s `kioskd_FILES` and is never called from `Daemon/main.m`, so it is not compiled into the running daemon. Don't "fix" it or wire it up; the live HA bridge is the app-side `TelemetryRelay` (see `TODO.md` Feature 1 if MQTT migration is the goal).
 
 ## Configuration
 

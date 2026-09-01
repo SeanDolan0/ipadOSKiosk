@@ -116,6 +116,18 @@ NSString *authJS = [NSString stringWithFormat:
     _webView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                 UIViewAutoresizingFlexibleHeight;
 
+    // Lock the page in place (the "kiosk" feel). WKWebView's scroll view has
+    // bounce enabled by default, which lets the page rubber-band (pull down and
+    // spring back) — that native pan gesture cancels the DOM touch sequence, so
+    // an injected swipe handler never sees a completed swipe. Disabling bounce
+    // both locks the layout like other kiosks AND lets horizontal swipes reach
+    // the page. The dashboard itself fits on screen (no real overflow to scroll).
+    _webView.scrollView.bounces = NO;
+    _webView.scrollView.alwaysBounceVertical = NO;
+    _webView.scrollView.alwaysBounceHorizontal = NO;
+    _webView.scrollView.showsVerticalScrollIndicator = NO;
+    _webView.scrollView.showsHorizontalScrollIndicator = NO;
+
     NSString *interceptJS = [NSString stringWithFormat:
         @"(function() {"
         "  var origFetch = window.fetch;"
@@ -142,6 +154,35 @@ NSString *authJS = [NSString stringWithFormat:
          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
        forMainFrameOnly:YES];
     [ucc addUserScript:interceptScript];
+
+    // iOS-12-safe horizontal swipe -> view navigation. Loads the bundled
+    // Resources/SwipeNav.js (ES5) and injects it at document start, same as the
+    // auth/intercept scripts. See SwipeNav.js for why the card can't be used.
+    NSString *swipeNavPath =
+        [[NSBundle mainBundle] pathForResource:@"SwipeNav" ofType:@"js"];
+    if (swipeNavPath) {
+        NSError *jsError = nil;
+        NSString *swipeNavJS =
+            [NSString stringWithContentsOfFile:swipeNavPath
+                                      encoding:NSUTF8StringEncoding
+                                         error:&jsError];
+        if (swipeNavJS) {
+            WKUserScript *swipeNavScript = [[WKUserScript alloc]
+                initWithSource:swipeNavJS
+                 injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+               forMainFrameOnly:YES];
+            [ucc addUserScript:swipeNavScript];
+            [self logDebug:[NSString stringWithFormat:
+                @"SwipedNav.js injection registered (%lu bytes)",
+                (unsigned long)swipeNavJS.length]];
+        } else {
+            [self logDebug:[NSString stringWithFormat:
+                @"ERROR failed to read SwipeNav.js: %@",
+                jsError.localizedDescription]];
+        }
+    } else {
+        [self logDebug:@"ERROR SwipeNav.js not found in bundle"];
+    }
 
     [self.view insertSubview:_webView atIndex:0];
 }
@@ -261,6 +302,13 @@ NSString *authJS = [NSString stringWithFormat:
     NSString *type = body[@"type"];
     if (!type) return;
 
+    if ([type isEqualToString:@"swipeDiag"]) {
+        // Temporary debug relay: dump the swipe-handler diagnostics to a file the
+        // host can read (the app's own NSLog isn't captured to a log file here).
+        [self logDebug:[NSString stringWithFormat:@"swipeDiag: %@", body]];
+        return;
+    }
+
     if ([type isEqualToString:@"setBrightness"]) {
         float value = [body[@"value"] floatValue];
         [self postCommand:@"setBrightness" value:[NSString stringWithFormat:@"%.2f", value]];
@@ -271,6 +319,27 @@ NSString *authJS = [NSString stringWithFormat:
     }
     else if ([type isEqualToString:@"wake"]) {
         [self dismissScreensaver];
+    }
+}
+
+#pragma mark - Debug Log Helper
+
+// Temporary: appends a line to a fixed debug log file so diagnostics are readable
+// from the host (the app's NSLog isn't captured to /var/log/hasmartboard.log).
+// Remove with the swipeDiag relay once the swipe feature is confirmed.
+- (void)logDebug:(NSString *)line {
+    NSString *path = @"/var/mobile/Library/hasmartboard-debug.log";
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
+        fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    }
+    if (fh) {
+        [fh seekToEndOfFile];
+        NSString *entry = [NSString stringWithFormat:@"[%@] %@\n",
+                           [NSDate date], line];
+        [fh writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
     }
 }
 
