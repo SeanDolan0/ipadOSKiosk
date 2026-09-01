@@ -18,6 +18,7 @@ HASmartboard_FILES = \
     App/main.m \
     App/AppDelegate.m \
     App/KioskViewController.m \
+    App/SettingsViewController.m \
     App/ScreensaverView.m \
     App/NetworkMonitor.m \
     App/DaemonBridge.m
