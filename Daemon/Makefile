@@ -8,6 +8,7 @@ TOOL_NAME = kioskd
 kioskd_FILES = \
     main.m \
     KioskConfig.m \
+    MQTTClient.c \
     TelemetryCollector.m \
     HTTPServer.m \
     DeviceControl.m
