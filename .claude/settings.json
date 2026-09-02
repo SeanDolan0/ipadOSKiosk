@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/guard_protected_source.py",
+            "description": "Require explicit confirmation before editing protected source (localhost bind, HA bridge, pinned SDK/install path)"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/validate_config_plist.py",
+            "description": "Validate config.plist schema after edits so config drift fails loudly instead of silently on-device"
+          }
+        ]
+      }
+    ]
+  }
+}
