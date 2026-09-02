@@ -35,7 +35,7 @@
         initWithTarget:self action:@selector(openSettings)];
     settingsGesture.numberOfTapsRequired = 4;
 
-    UIView *hotspotView = [[UIView alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 80, 0, 80, 80)];
+    UIView *hotspotView = [[UIView alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 60, 0, 60, 60)];
     hotspotView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
     hotspotView.backgroundColor = [UIColor clearColor];
     [hotspotView addGestureRecognizer:settingsGesture];
@@ -315,6 +315,7 @@ NSString *authJS = [NSString stringWithFormat:
         // Re-inject WKUserScripts with new token and reload dashboard
         [_webView removeFromSuperview];
         [self setupWebView];
+        [self.view sendSubviewToBack:self->_webView];
         [self loadDashboard];
     }
 

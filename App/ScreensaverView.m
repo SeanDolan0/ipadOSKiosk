@@ -80,7 +80,7 @@
 
 - (void)handleSettingsTap:(UITapGestureRecognizer *)recognizer {
     CGPoint point = [recognizer locationInView:self];
-    if (point.x >= (self.bounds.size.width - 100) && point.y <= 100) {
+    if (point.x >= (self.bounds.size.width - 60) && point.y <= 60) {
         [self.delegate screensaverDidRequestSettings];
     } else {
         [self.delegate screensaverDidReceiveTouch];

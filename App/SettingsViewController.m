@@ -275,6 +275,8 @@
 }
 
 - (void)testConnection {
+    if (self.activityIndicator.isAnimating) return;
+
     [self.view endEditing:YES];
     [_activityIndicator startAnimating];
     _statusLabel.textColor = [UIColor darkGrayColor];
@@ -316,6 +318,7 @@
     __block NSString *daemonResult = nil;
     __block BOOL daemonSuccess = NO;
 
+    __weak typeof(self) weakSelf = self;
     dispatch_group_t group = dispatch_group_create();
 
     // 1. HA Test
@@ -355,17 +358,20 @@
     [daemonTask resume];
 
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-        [self->_activityIndicator stopAnimating];
-        self->_statusLabel.text = [NSString stringWithFormat:@"%@\n%@", haResult, daemonResult];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+        [strongSelf.activityIndicator stopAnimating];
+        strongSelf.statusLabel.text = [NSString stringWithFormat:@"%@\n%@", haResult, daemonResult];
         if (haSuccess && daemonSuccess) {
-            self->_statusLabel.textColor = [UIColor colorWithRed:0.0 green:0.5 blue:0.0 alpha:1.0];
+            strongSelf.statusLabel.textColor = [UIColor colorWithRed:0.0 green:0.5 blue:0.0 alpha:1.0];
         } else if (haSuccess) {
-            self->_statusLabel.textColor = [UIColor colorWithRed:0.7 green:0.5 blue:0.0 alpha:1.0];
+            strongSelf.statusLabel.textColor = [UIColor colorWithRed:0.7 green:0.5 blue:0.0 alpha:1.0];
         } else {
-            self->_statusLabel.textColor = [UIColor redColor];
+            strongSelf.statusLabel.textColor = [UIColor redColor];
         }
-        [self.tableView beginUpdates];
-        [self.tableView endUpdates];
+        [strongSelf.tableView beginUpdates];
+        [strongSelf.tableView endUpdates];
     });
 }
 
