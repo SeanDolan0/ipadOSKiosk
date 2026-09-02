@@ -3,9 +3,34 @@
 #import "NetworkMonitor.h"
 #import "DaemonBridge.h"
 #import "SettingsViewController.h"
-#import <AVFoundation/AVFoundation.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import <notify.h>
+
+@interface AVSpeechSynthesisVoice : NSObject
++ (instancetype)voiceWithLanguage:(NSString *)languageCode;
+@end
+
+@interface AVSpeechUtterance : NSObject
++ (instancetype)speechUtteranceWithString:(NSString *)string;
+@property(nonatomic, retain) AVSpeechSynthesisVoice *voice;
+@property(nonatomic) float rate;
+@end
+
+@interface AVSpeechSynthesizer : NSObject
+- (void)speakUtterance:(AVSpeechUtterance *)utterance;
+- (BOOL)stopSpeakingAtBoundary:(NSInteger)boundary;
+@end
+
+@interface AVAudioSession : NSObject
++ (instancetype)sharedInstance;
+- (BOOL)setCategory:(NSString *)category withOptions:(NSUInteger)options error:(NSError **)outError;
+- (BOOL)setActive:(BOOL)active error:(NSError **)outError;
+@end
+
+extern void AudioServicesPlaySystemSound(uint32_t inSystemSoundID);
+
+#define AV_AUDIO_SESSION_CATEGORY_PLAYBACK @"AVAudioSessionCategoryPlayback"
+#define AV_AUDIO_SESSION_OPTION_DUCK_OTHERS (1 << 1)
+#define AV_SPEECH_BOUNDARY_IMMEDIATE 0
 
 #define PREFS_PATH @"/var/mobile/Library/Preferences/com.hasmartboard.plist"
 
@@ -45,8 +70,8 @@ static void onDarwinCommandCallback(CFNotificationCenterRef center,
 
     // Configure Audio Session for Playback with ducking
     NSError *audioError = nil;
-    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback
-                                     withOptions:AVAudioSessionCategoryOptionDuckOthers
+    [[AVAudioSession sharedInstance] setCategory:AV_AUDIO_SESSION_CATEGORY_PLAYBACK
+                                     withOptions:AV_AUDIO_SESSION_OPTION_DUCK_OTHERS
                                            error:&audioError];
     [[AVAudioSession sharedInstance] setActive:YES error:nil];
 
@@ -465,7 +490,7 @@ NSString *authJS = [NSString stringWithFormat:
             if (text && text.length > 0) {
                 AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
                 utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"en-US"];
-                [self->_speechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+                [self->_speechSynthesizer stopSpeakingAtBoundary:AV_SPEECH_BOUNDARY_IMMEDIATE];
                 [self->_speechSynthesizer speakUtterance:utterance];
             }
         } else if ([action isEqualToString:@"beep"]) {

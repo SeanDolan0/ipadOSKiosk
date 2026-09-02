@@ -1,7 +1,7 @@
 Package: com.hasmartboard
 Name: HASmartboard
 Depends: firmware (>= 12.0), mobilesubstrate, firmware-sbin
-Version: 1.0.4
+Version: 1.0.5
 Architecture: iphoneos-arm
 Description: Home Assistant Kiosk Dashboard for iPadOS 12
 Maintainer: dev

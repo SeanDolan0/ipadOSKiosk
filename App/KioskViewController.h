@@ -1,7 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
-#import <AVFoundation/AVFoundation.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import "ScreensaverView.h"
 #import "SettingsViewController.h"
 
