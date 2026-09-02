@@ -168,9 +168,23 @@ static void restartDaemon(void) {
 
 #pragma mark - App IPC Dispatch
 
+#define SPOOL_DIR @"/var/mobile/Library/hasmartboard-cmds"
+static uint64_t s_cmdSeq = 0;
+
+static void ensureSpoolDirectory(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:SPOOL_DIR]) {
+        NSDictionary *attrs = @{NSFilePosixPermissions: @(0777)};
+        [fm createDirectoryAtPath:SPOOL_DIR withIntermediateDirectories:YES attributes:attrs error:nil];
+        chmod([SPOOL_DIR UTF8String], 0777);
+    }
+}
+
 static void dispatchAppCommand(const char *action, const char *value) {
     if (!action) return;
     @autoreleasepool {
+        ensureSpoolDirectory();
+
         NSString *actionStr = [NSString stringWithUTF8String:action];
         NSString *valueStr = value ? [NSString stringWithUTF8String:value] : @"";
         NSDictionary *payload = @{
@@ -180,11 +194,19 @@ static void dispatchAppCommand(const char *action, const char *value) {
         NSError *error = nil;
         NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&error];
         if (!error && jsonData) {
-            NSString *cmdPath = @"/var/mobile/Library/hasmartboard-cmd.json";
-            [jsonData writeToFile:cmdPath atomically:YES];
-            chmod([cmdPath UTF8String], 0666);
-            notify_post("com.hasmartboard.command");
-            syslog(LOG_NOTICE, "kioskd: dispatched app IPC command '%s'", action);
+            uint64_t ts = (uint64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+            uint64_t seq = ++s_cmdSeq;
+            NSString *filename = [NSString stringWithFormat:@"cmd-%llu-%llu.json",
+                                  (unsigned long long)ts, (unsigned long long)seq];
+            NSString *cmdPath = [SPOOL_DIR stringByAppendingPathComponent:filename];
+
+            if ([jsonData writeToFile:cmdPath atomically:YES]) {
+                chmod([cmdPath UTF8String], 0666);
+                notify_post("com.hasmartboard.command");
+                syslog(LOG_NOTICE, "kioskd: queued app IPC command '%s' in %s", action, [filename UTF8String]);
+            } else {
+                syslog(LOG_ERR, "kioskd: failed to write IPC command file %s", [cmdPath UTF8String]);
+            }
         } else {
             syslog(LOG_ERR, "kioskd: failed to serialize IPC command '%s'", action);
         }

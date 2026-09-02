@@ -32,4 +32,4 @@ HASmartboard_RESOURCE_FILES = HASmartboard/Info.plist Resources/SwipeNav.js
 include $(THEOS_MAKE_PATH)/application.mk
 
 SUBPROJECTS += Daemon
-include $(THEOS_MAKE_PATH)/aggregate.mk
+include $(THEOS)/makefiles/aggregate.mk

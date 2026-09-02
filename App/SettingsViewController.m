@@ -1,4 +1,10 @@
 #import "SettingsViewController.h"
+#import "MQTTClient.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
 
 #define PREFS_PATH @"/var/mobile/Library/Preferences/com.hasmartboard.plist"
 
@@ -6,6 +12,18 @@
 @property (nonatomic, strong) UITextField *haURLField;
 @property (nonatomic, strong) UITextField *haPathField;
 @property (nonatomic, strong) UITextField *haTokenField;
+
+@property (nonatomic, strong) UISwitch *mqttEnabledSwitch;
+@property (nonatomic, strong) UITextField *mqttHostField;
+@property (nonatomic, strong) UITextField *mqttPortField;
+@property (nonatomic, strong) UITextField *mqttUserField;
+@property (nonatomic, strong) UITextField *mqttPassField;
+@property (nonatomic, strong) UITextField *mqttPrefixField;
+@property (nonatomic, strong) UITextField *mqttClientIdField;
+@property (nonatomic, strong) UITextField *mqttIntervalField;
+@property (nonatomic, strong) UIActivityIndicatorView *mqttActivityIndicator;
+@property (nonatomic, strong) UILabel *mqttStatusLabel;
+
 @property (nonatomic, strong) UITextField *idleTimeoutField;
 @property (nonatomic, strong) UISegmentedControl *screensaverModeControl;
 @property (nonatomic, strong) UILabel *statusLabel;
@@ -50,9 +68,11 @@
 
 - (void)setupControls {
     NSDictionary *ha = _loadedPrefs[@"ha"] ?: @{};
+    NSDictionary *mqtt = _loadedPrefs[@"mqtt"] ?: @{};
     NSDictionary *screensaver = _loadedPrefs[@"screensaver"] ?: @{};
 
-    _haURLField = [[UITextField alloc] initWithFrame:CGRectMake(120, 7, 240, 30)];
+    // Home Assistant
+    _haURLField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
     _haURLField.placeholder = @"http://192.168.50.150:8123";
     _haURLField.text = ha[@"url"] ?: @"";
     _haURLField.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -61,7 +81,7 @@
     _haURLField.clearButtonMode = UITextFieldViewModeWhileEditing;
     _haURLField.delegate = self;
 
-    _haPathField = [[UITextField alloc] initWithFrame:CGRectMake(120, 7, 240, 30)];
+    _haPathField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
     _haPathField.placeholder = @"/bedroom-kiosk/0";
     _haPathField.text = ha[@"dashboardPath"] ?: @"";
     _haPathField.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -69,7 +89,7 @@
     _haPathField.clearButtonMode = UITextFieldViewModeWhileEditing;
     _haPathField.delegate = self;
 
-    _haTokenField = [[UITextField alloc] initWithFrame:CGRectMake(120, 7, 240, 30)];
+    _haTokenField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
     _haTokenField.placeholder = @"Long-lived access token";
     _haTokenField.text = ha[@"token"] ?: @"";
     _haTokenField.secureTextEntry = YES;
@@ -78,7 +98,81 @@
     _haTokenField.clearButtonMode = UITextFieldViewModeWhileEditing;
     _haTokenField.delegate = self;
 
-    _idleTimeoutField = [[UITextField alloc] initWithFrame:CGRectMake(160, 7, 200, 30)];
+    // MQTT Telemetry
+    _mqttEnabledSwitch = [[UISwitch alloc] init];
+    if (mqtt[@"enabled"] != nil) {
+        _mqttEnabledSwitch.on = [mqtt[@"enabled"] boolValue];
+    } else {
+        _mqttEnabledSwitch.on = YES;
+    }
+
+    _mqttHostField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttHostField.placeholder = @"192.168.50.150";
+    _mqttHostField.text = mqtt[@"host"] ?: @"";
+    _mqttHostField.autocorrectionType = UITextAutocorrectionTypeNo;
+    _mqttHostField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _mqttHostField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    _mqttHostField.delegate = self;
+
+    _mqttPortField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttPortField.placeholder = @"1883";
+    NSNumber *portNum = mqtt[@"port"] ?: @(1883);
+    _mqttPortField.text = [portNum stringValue];
+    _mqttPortField.keyboardType = UIKeyboardTypeNumberPad;
+    _mqttPortField.delegate = self;
+
+    _mqttUserField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttUserField.placeholder = @"kiosk";
+    _mqttUserField.text = mqtt[@"user"] ?: @"";
+    _mqttUserField.autocorrectionType = UITextAutocorrectionTypeNo;
+    _mqttUserField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _mqttUserField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    _mqttUserField.delegate = self;
+
+    _mqttPassField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttPassField.placeholder = @"Password";
+    _mqttPassField.text = mqtt[@"pass"] ?: @"";
+    _mqttPassField.secureTextEntry = YES;
+    _mqttPassField.autocorrectionType = UITextAutocorrectionTypeNo;
+    _mqttPassField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _mqttPassField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    _mqttPassField.delegate = self;
+
+    _mqttPrefixField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttPrefixField.placeholder = @"kiosk";
+    _mqttPrefixField.text = mqtt[@"prefix"] ?: @"";
+    _mqttPrefixField.autocorrectionType = UITextAutocorrectionTypeNo;
+    _mqttPrefixField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _mqttPrefixField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    _mqttPrefixField.delegate = self;
+
+    _mqttClientIdField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttClientIdField.placeholder = @"hasmartboard-ipad";
+    _mqttClientIdField.text = mqtt[@"clientId"] ?: @"";
+    _mqttClientIdField.autocorrectionType = UITextAutocorrectionTypeNo;
+    _mqttClientIdField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _mqttClientIdField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    _mqttClientIdField.delegate = self;
+
+    _mqttIntervalField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
+    _mqttIntervalField.placeholder = @"30";
+    NSNumber *intervalNum = mqtt[@"interval"] ?: @(30);
+    _mqttIntervalField.text = [intervalNum stringValue];
+    _mqttIntervalField.keyboardType = UIKeyboardTypeNumberPad;
+    _mqttIntervalField.delegate = self;
+
+    _mqttStatusLabel = [[UILabel alloc] init];
+    _mqttStatusLabel.numberOfLines = 0;
+    _mqttStatusLabel.font = [UIFont systemFontOfSize:13];
+    _mqttStatusLabel.textColor = [UIColor darkGrayColor];
+    _mqttStatusLabel.textAlignment = NSTextAlignmentCenter;
+    _mqttStatusLabel.text = @"Ready to test MQTT";
+
+    _mqttActivityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+    _mqttActivityIndicator.hidesWhenStopped = YES;
+
+    // Screensaver
+    _idleTimeoutField = [[UITextField alloc] initWithFrame:CGRectMake(130, 7, 230, 30)];
     _idleTimeoutField.placeholder = @"300";
     NSNumber *timeoutNum = screensaver[@"idleTimeout"] ?: @(300);
     _idleTimeoutField.text = [timeoutNum stringValue];
@@ -90,6 +184,7 @@
     NSString *mode = screensaver[@"mode"] ?: @"clock";
     _screensaverModeControl.selectedSegmentIndex = [mode isEqualToString:@"photo"] ? 1 : 0;
 
+    // Diagnostics
     _statusLabel = [[UILabel alloc] init];
     _statusLabel.numberOfLines = 0;
     _statusLabel.font = [UIFont systemFontOfSize:13];
@@ -104,26 +199,29 @@
 #pragma mark - Table View Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 3;
+    return 4;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 3; // HA: URL, Path, Token
-    if (section == 1) return 2; // Screensaver: Timeout, Mode
-    if (section == 2) return 2; // Diagnostics: Test button, Status
+    if (section == 0) return 3;  // HA: URL, Path, Token
+    if (section == 1) return 10; // MQTT: Enabled, Host, Port, User, Pass, Prefix, ClientId, Interval, Test Button, Status
+    if (section == 2) return 2;  // Screensaver: Timeout, Mode
+    if (section == 3) return 2;  // Diagnostics: Test button, Status
     return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return @"Home Assistant";
-    if (section == 1) return @"Screensaver";
-    if (section == 2) return @"Diagnostics";
+    if (section == 1) return @"MQTT Telemetry";
+    if (section == 2) return @"Screensaver";
+    if (section == 3) return @"Diagnostics";
     return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return @"Token is injected into the webview for dashboard authorization.";
-    if (section == 1) return @"Idle timeout in seconds before screensaver activates.";
+    if (section == 1) return @"Configures the MQTT background telemetry client in kioskd.";
+    if (section == 2) return @"Idle timeout in seconds before screensaver activates.";
     return nil;
 }
 
@@ -137,7 +235,7 @@
             [cell.contentView addSubview:_haURLField];
             _haURLField.translatesAutoresizingMaskIntoConstraints = NO;
             [NSLayoutConstraint activateConstraints:@[
-                [_haURLField.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:20],
+                [_haURLField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
                 [_haURLField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
                 [_haURLField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             ]];
@@ -146,7 +244,7 @@
             [cell.contentView addSubview:_haPathField];
             _haPathField.translatesAutoresizingMaskIntoConstraints = NO;
             [NSLayoutConstraint activateConstraints:@[
-                [_haPathField.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:20],
+                [_haPathField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
                 [_haPathField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
                 [_haPathField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             ]];
@@ -155,18 +253,101 @@
             [cell.contentView addSubview:_haTokenField];
             _haTokenField.translatesAutoresizingMaskIntoConstraints = NO;
             [NSLayoutConstraint activateConstraints:@[
-                [_haTokenField.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:20],
+                [_haTokenField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
                 [_haTokenField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
                 [_haTokenField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             ]];
         }
     } else if (indexPath.section == 1) {
         if (indexPath.row == 0) {
+            cell.textLabel.text = @"Enable MQTT";
+            cell.accessoryView = _mqttEnabledSwitch;
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"Host";
+            [cell.contentView addSubview:_mqttHostField];
+            _mqttHostField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttHostField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttHostField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttHostField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"Port";
+            [cell.contentView addSubview:_mqttPortField];
+            _mqttPortField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttPortField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttPortField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttPortField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 3) {
+            cell.textLabel.text = @"Username";
+            [cell.contentView addSubview:_mqttUserField];
+            _mqttUserField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttUserField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttUserField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttUserField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 4) {
+            cell.textLabel.text = @"Password";
+            [cell.contentView addSubview:_mqttPassField];
+            _mqttPassField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttPassField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttPassField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttPassField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 5) {
+            cell.textLabel.text = @"Prefix";
+            [cell.contentView addSubview:_mqttPrefixField];
+            _mqttPrefixField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttPrefixField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttPrefixField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttPrefixField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 6) {
+            cell.textLabel.text = @"Client ID";
+            [cell.contentView addSubview:_mqttClientIdField];
+            _mqttClientIdField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttClientIdField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttClientIdField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttClientIdField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 7) {
+            cell.textLabel.text = @"Interval (sec)";
+            [cell.contentView addSubview:_mqttIntervalField];
+            _mqttIntervalField.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttIntervalField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
+                [_mqttIntervalField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttIntervalField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            ]];
+        } else if (indexPath.row == 8) {
+            cell.textLabel.text = @"Test MQTT Connection";
+            cell.textLabel.textColor = self.view.tintColor;
+            cell.textLabel.textAlignment = NSTextAlignmentCenter;
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+            cell.accessoryView = _mqttActivityIndicator;
+        } else if (indexPath.row == 9) {
+            [cell.contentView addSubview:_mqttStatusLabel];
+            _mqttStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+            [NSLayoutConstraint activateConstraints:@[
+                [_mqttStatusLabel.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:15],
+                [_mqttStatusLabel.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                [_mqttStatusLabel.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:10],
+                [_mqttStatusLabel.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-10],
+            ]];
+        }
+    } else if (indexPath.section == 2) {
+        if (indexPath.row == 0) {
             cell.textLabel.text = @"Timeout (sec)";
             [cell.contentView addSubview:_idleTimeoutField];
             _idleTimeoutField.translatesAutoresizingMaskIntoConstraints = NO;
             [NSLayoutConstraint activateConstraints:@[
-                [_idleTimeoutField.leadingAnchor constraintEqualToAnchor:cell.textLabel.trailingAnchor constant:20],
+                [_idleTimeoutField.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:130],
                 [_idleTimeoutField.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
                 [_idleTimeoutField.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             ]];
@@ -179,7 +360,7 @@
                 [_screensaverModeControl.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             ]];
         }
-    } else if (indexPath.section == 2) {
+    } else if (indexPath.section == 3) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Test Connection";
             cell.textLabel.textColor = self.view.tintColor;
@@ -203,7 +384,9 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 2 && indexPath.row == 0) {
+    if (indexPath.section == 1 && indexPath.row == 8) {
+        [self testMQTTConnection];
+    } else if (indexPath.section == 3 && indexPath.row == 0) {
         [self testConnection];
     }
 }
@@ -249,12 +432,30 @@
     // Build mutable root config preserving existing keys
     NSMutableDictionary *root = [_loadedPrefs mutableCopy] ?: [NSMutableDictionary dictionary];
 
+    // Home Assistant
     NSMutableDictionary *ha = [root[@"ha"] mutableCopy] ?: [NSMutableDictionary dictionary];
     ha[@"url"] = urlString;
     ha[@"dashboardPath"] = pathString;
     ha[@"token"] = tokenString ?: @"";
     root[@"ha"] = ha;
 
+    // MQTT
+    NSMutableDictionary *mqtt = [root[@"mqtt"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    mqtt[@"enabled"] = @(_mqttEnabledSwitch.isOn);
+    mqtt[@"host"] = [_mqttHostField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    NSInteger port = [_mqttPortField.text integerValue];
+    mqtt[@"port"] = @(port > 0 ? port : 1883);
+    mqtt[@"user"] = [_mqttUserField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    mqtt[@"pass"] = _mqttPassField.text ?: @"";
+    NSString *prefix = [_mqttPrefixField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    mqtt[@"prefix"] = prefix.length > 0 ? prefix : @"kiosk";
+    NSString *clientId = [_mqttClientIdField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    mqtt[@"clientId"] = clientId.length > 0 ? clientId : @"hasmartboard-ipad";
+    NSInteger interval = [_mqttIntervalField.text integerValue];
+    mqtt[@"interval"] = @(interval > 0 ? interval : 30);
+    root[@"mqtt"] = mqtt;
+
+    // Screensaver
     NSMutableDictionary *screensaver = [root[@"screensaver"] mutableCopy] ?: [NSMutableDictionary dictionary];
     screensaver[@"idleTimeout"] = @(timeout);
     screensaver[@"mode"] = modeString;
@@ -270,8 +471,84 @@
         return;
     }
 
+    // Notify kioskd to reload config
+    NSURL *cmdURL = [NSURL URLWithString:@"http://127.0.0.1:9090/command"];
+    NSMutableURLRequest *cmdReq = [NSMutableURLRequest requestWithURL:cmdURL];
+    cmdReq.HTTPMethod = @"POST";
+    [cmdReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    cmdReq.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"action": @"restartDaemon"} options:0 error:nil];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:cmdReq] resume];
+
     [self.delegate settingsViewController:self didSaveConfig:root];
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)testMQTTConnection {
+    if (self.mqttActivityIndicator.isAnimating) return;
+
+    [self.view endEditing:YES];
+    [_mqttActivityIndicator startAnimating];
+    _mqttStatusLabel.textColor = [UIColor darkGrayColor];
+    _mqttStatusLabel.text = @"Connecting to MQTT broker...";
+
+    NSString *host = [_mqttHostField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSInteger port = [_mqttPortField.text integerValue];
+    if (port <= 0) port = 1883;
+
+    NSString *user = [_mqttUserField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *pass = _mqttPassField.text ?: @"";
+    NSString *clientId = [_mqttClientIdField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (clientId.length == 0) clientId = @"hasmartboard-ipad";
+    NSString *testClientId = [NSString stringWithFormat:@"%@-test", clientId];
+
+    if (host.length == 0) {
+        [_mqttActivityIndicator stopAnimating];
+        _mqttStatusLabel.textColor = [UIColor redColor];
+        _mqttStatusLabel.text = @"❌ Host is empty";
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        MQTTClient client;
+        memset(&client, 0, sizeof(client));
+        client.sockfd = -1;
+        snprintf(client.host, sizeof(client.host), "%s", host.UTF8String);
+        client.port = (int)port;
+        snprintf(client.username, sizeof(client.username), "%s", user.UTF8String);
+        snprintf(client.password, sizeof(client.password), "%s", pass.UTF8String);
+        snprintf(client.clientId, sizeof(client.clientId), "%s", testClientId.UTF8String);
+        client.keepalive = 10;
+
+        int rc = mqttConnect(&client);
+        NSString *resultText = nil;
+        BOOL isOk = NO;
+
+        if (rc == 0) {
+            isOk = YES;
+            resultText = [NSString stringWithFormat:@"✅ Connected & Authorized (%@:%ld)", host, (long)port];
+            mqttClose(&client);
+        } else if (rc == -1 || rc == -2) {
+            resultText = [NSString stringWithFormat:@"❌ Cannot reach %@:%ld (Network/Host Unreachable)", host, (long)port];
+        } else if (rc == -5) {
+            resultText = @"❌ Broker did not reply with CONNACK";
+        } else if (rc == -6) {
+            resultText = @"❌ Authentication failed (Check user/password)";
+        } else {
+            resultText = [NSString stringWithFormat:@"❌ Connection failed (code %d)", rc];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+
+            [strongSelf.mqttActivityIndicator stopAnimating];
+            strongSelf.mqttStatusLabel.text = resultText;
+            strongSelf.mqttStatusLabel.textColor = isOk ? [UIColor colorWithRed:0.0 green:0.5 blue:0.0 alpha:1.0] : [UIColor redColor];
+            [strongSelf.tableView beginUpdates];
+            [strongSelf.tableView endUpdates];
+        });
+    });
 }
 
 - (void)testConnection {
@@ -280,7 +557,7 @@
     [self.view endEditing:YES];
     [_activityIndicator startAnimating];
     _statusLabel.textColor = [UIColor darkGrayColor];
-    _statusLabel.text = @"Testing connection to Home Assistant & kioskd...";
+    _statusLabel.text = @"Testing connection...";
 
     NSString *haURLString = [_haURLField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *token = [_haTokenField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -313,10 +590,22 @@
                                                cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                            timeoutInterval:3.0];
 
+    NSString *mqttHost = [_mqttHostField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSInteger mqttPort = [_mqttPortField.text integerValue];
+    if (mqttPort <= 0) mqttPort = 1883;
+    NSString *mqttUser = [_mqttUserField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *mqttPass = _mqttPassField.text ?: @"";
+    NSString *mqttClientId = [_mqttClientIdField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (mqttClientId.length == 0) mqttClientId = @"hasmartboard-ipad";
+    NSString *testClientId = [NSString stringWithFormat:@"%@-test", mqttClientId];
+    BOOL mqttEnabled = _mqttEnabledSwitch.isOn;
+
     __block NSString *haResult = nil;
     __block BOOL haSuccess = NO;
     __block NSString *daemonResult = nil;
     __block BOOL daemonSuccess = NO;
+    __block NSString *mqttResult = nil;
+    __block BOOL mqttSuccess = NO;
 
     __weak typeof(self) weakSelf = self;
     dispatch_group_t group = dispatch_group_create();
@@ -357,15 +646,51 @@
         }];
     [daemonTask resume];
 
+    // 3. MQTT Test (Full Protocol Handshake)
+    if (mqttEnabled && mqttHost.length > 0) {
+        dispatch_group_enter(group);
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            MQTTClient client;
+            memset(&client, 0, sizeof(client));
+            client.sockfd = -1;
+            snprintf(client.host, sizeof(client.host), "%s", mqttHost.UTF8String);
+            client.port = (int)mqttPort;
+            snprintf(client.username, sizeof(client.username), "%s", mqttUser.UTF8String);
+            snprintf(client.password, sizeof(client.password), "%s", mqttPass.UTF8String);
+            snprintf(client.clientId, sizeof(client.clientId), "%s", testClientId.UTF8String);
+            client.keepalive = 10;
+
+            int rc = mqttConnect(&client);
+            if (rc == 0) {
+                mqttSuccess = YES;
+                mqttResult = [NSString stringWithFormat:@"✅ MQTT: Connected (%@:%ld)", mqttHost, (long)mqttPort];
+                mqttClose(&client);
+            } else if (rc == -6) {
+                mqttResult = @"❌ MQTT: Auth Failed (Check user/pass)";
+            } else {
+                mqttResult = [NSString stringWithFormat:@"❌ MQTT: Connect failed (code %d)", rc];
+            }
+            dispatch_group_leave(group);
+        });
+    }
+
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
         [strongSelf.activityIndicator stopAnimating];
-        strongSelf.statusLabel.text = [NSString stringWithFormat:@"%@\n%@", haResult, daemonResult];
-        if (haSuccess && daemonSuccess) {
+
+        NSMutableArray *results = [NSMutableArray array];
+        if (haResult) [results addObject:haResult];
+        if (mqttResult) [results addObject:mqttResult];
+        if (daemonResult) [results addObject:daemonResult];
+
+        strongSelf.statusLabel.text = [results componentsJoinedByString:@"\n"];
+
+        BOOL allOk = haSuccess && daemonSuccess && (!mqttEnabled || mqttHost.length == 0 || mqttSuccess);
+        if (allOk) {
             strongSelf.statusLabel.textColor = [UIColor colorWithRed:0.0 green:0.5 blue:0.0 alpha:1.0];
-        } else if (haSuccess) {
+        } else if (haSuccess || mqttSuccess || daemonSuccess) {
             strongSelf.statusLabel.textColor = [UIColor colorWithRed:0.7 green:0.5 blue:0.0 alpha:1.0];
         } else {
             strongSelf.statusLabel.textColor = [UIColor redColor];
@@ -376,3 +701,4 @@
 }
 
 @end
+

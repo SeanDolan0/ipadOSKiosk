@@ -92,7 +92,7 @@ Discovery config JSON (per sensor):
 | battery_level | Kiosk Battery Level | % | battery |
 | battery_current | Kiosk Battery Current | mA | — |
 | battery_temp | Kiosk Battery Temp | °C | temperature |
-| battery_health | Kiosk Battery Health | % | battery |
+| battery_health | Kiosk Battery Health | % | — |
 | battery_cycles | Kiosk Battery Cycles | count | — |
 | wifi_rssi | Kiosk WiFi RSSI | dBm | signal_strength |
 | wifi_ssid | Kiosk WiFi SSID | — | — |

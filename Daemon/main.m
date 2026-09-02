@@ -140,6 +140,9 @@ static void *mqttLoop(void *arg) {
         }
         syslog(LOG_NOTICE, "kioskd: subscribed to %s", subTopic);
 
+        uint8_t recvBuf[4096];
+        size_t recvLen = 0;
+
         time_t lastState = 0;
         time_t lastSend = time(NULL);
         while (g_running) {
@@ -156,24 +159,57 @@ static void *mqttLoop(void *arg) {
             }
 
             if (pret > 0 && (pfd.revents & POLLIN)) {
-                uint8_t buf[2048];
-                ssize_t n = recv(client.sockfd, buf, sizeof(buf) - 1, 0);
+                if (sizeof(recvBuf) <= recvLen) {
+                    syslog(LOG_WARNING, "kioskd: MQTT accumulator buffer overflow, resetting");
+                    recvLen = 0;
+                }
+
+                ssize_t n = recv(client.sockfd, recvBuf + recvLen, sizeof(recvBuf) - recvLen, 0);
                 if (n <= 0) {
                     syslog(LOG_WARNING, "kioskd: MQTT connection lost during recv");
                     break;
                 }
+                recvLen += (size_t)n;
 
                 size_t off = 0;
-                while (off < (size_t)n) {
-                    const uint8_t *pkt = buf + off;
-                    size_t remaining = (size_t)n - off;
-                    if (remaining < 2) break;
+                while (off < recvLen) {
+                    size_t available = recvLen - off;
+                    if (available < 2) {
+                        break;
+                    }
 
+                    const uint8_t *pkt = recvBuf + off;
                     uint8_t pktType = pkt[0] & 0xF0;
+
+                    size_t idx = 1;
+                    uint32_t remLen = 0;
+                    uint32_t mult = 1;
+                    int remLenDone = 0;
+                    while (idx < available && idx < 5) {
+                        uint8_t digit = pkt[idx++];
+                        remLen += (uint32_t)(digit & 0x7F) * mult;
+                        mult *= 128;
+                        if ((digit & 0x80) == 0) {
+                            remLenDone = 1;
+                            break;
+                        }
+                    }
+
+                    if (!remLenDone) {
+                        break;
+                    }
+
+                    size_t remLenBytes = idx - 1;
+                    size_t pktTotalLen = 1 + remLenBytes + (size_t)remLen;
+
+                    if (available < pktTotalLen) {
+                        break;
+                    }
+
                     if (pktType == 0x30) { // PUBLISH
                         char topic[256] = {0};
                         char payload[1024] = {0};
-                        if (mqttParsePublish(pkt, remaining, topic, sizeof(topic), payload, sizeof(payload)) == 0) {
+                        if (mqttParsePublish(pkt, pktTotalLen, topic, sizeof(topic), payload, sizeof(payload)) == 0) {
                             char setPrefix[256];
                             snprintf(setPrefix, sizeof(setPrefix), "%s/set/", cfg->prefix);
                             size_t setPrefixLen = strlen(setPrefix);
@@ -184,50 +220,23 @@ static void *mqttLoop(void *arg) {
                                 syslog(LOG_WARNING, "kioskd: MQTT received publish with unexpected topic: %s", topic);
                             }
                         }
-
-                        // Advance past this PUBLISH packet
-                        size_t idx = 1;
-                        uint32_t remLen = 0;
-                        uint32_t mult = 1;
-                        int done = 0;
-                        while (idx < remaining && idx < 5) {
-                            uint8_t digit = pkt[idx++];
-                            remLen += (uint32_t)(digit & 0x7F) * mult;
-                            mult *= 128;
-                            if ((digit & 0x80) == 0) {
-                                done = 1;
-                                break;
-                            }
-                        }
-                        if (done && idx + remLen <= remaining) {
-                            off += idx + remLen;
-                        } else {
-                            break;
-                        }
                     } else if (pktType == 0x90) { // SUBACK
-                        size_t idx = 1;
-                        uint32_t remLen = 0;
-                        uint32_t mult = 1;
-                        int done = 0;
-                        while (idx < remaining && idx < 5) {
-                            uint8_t digit = pkt[idx++];
-                            remLen += (uint32_t)(digit & 0x7F) * mult;
-                            mult *= 128;
-                            if ((digit & 0x80) == 0) {
-                                done = 1;
-                                break;
-                            }
-                        }
-                        if (done && idx + remLen <= remaining) {
-                            off += idx + remLen;
-                        } else {
-                            break;
-                        }
+                        // Subscription confirmed
                     } else if (pktType == 0xD0) { // PINGRESP
-                        off += 2;
+                        // Ping response
                     } else {
-                        break;
+                        syslog(LOG_WARNING, "kioskd: MQTT received unknown packet type 0x%02X", pktType);
                     }
+
+                    off += pktTotalLen;
+                }
+
+                if (off > 0) {
+                    size_t remainingBytes = recvLen - off;
+                    if (remainingBytes > 0) {
+                        memmove(recvBuf, recvBuf + off, remainingBytes);
+                    }
+                    recvLen = remainingBytes;
                 }
             } else if (pret > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
                 syslog(LOG_WARNING, "kioskd: MQTT socket error event: 0x%x", pfd.revents);

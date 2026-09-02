@@ -33,9 +33,17 @@ void KioskConfigLoadMQTT(KioskMQTTConfig *out) {
         NSString *v = mqtt[@"user"];
         if ([v isKindOfClass:[NSString class]] && v.length < sizeof(out->username))
             snprintf(out->username, sizeof(out->username), "%s", v.UTF8String);
+    } else if ([mqtt objectForKey:@"username"]) {
+        NSString *v = mqtt[@"username"];
+        if ([v isKindOfClass:[NSString class]] && v.length < sizeof(out->username))
+            snprintf(out->username, sizeof(out->username), "%s", v.UTF8String);
     }
     if ([mqtt objectForKey:@"pass"]) {
         NSString *v = mqtt[@"pass"];
+        if ([v isKindOfClass:[NSString class]] && v.length < sizeof(out->password))
+            snprintf(out->password, sizeof(out->password), "%s", v.UTF8String);
+    } else if ([mqtt objectForKey:@"password"]) {
+        NSString *v = mqtt[@"password"];
         if ([v isKindOfClass:[NSString class]] && v.length < sizeof(out->password))
             snprintf(out->password, sizeof(out->password), "%s", v.UTF8String);
     }

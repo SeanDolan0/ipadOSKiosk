@@ -4,6 +4,7 @@
 #import "DaemonBridge.h"
 #import "SettingsViewController.h"
 #import <notify.h>
+#import <sys/stat.h>
 
 @interface AVSpeechSynthesisVoice : NSObject
 + (instancetype)voiceWithLanguage:(NSString *)languageCode;
@@ -85,6 +86,16 @@ static void onDarwinCommandCallback(CFNotificationCenterRef center,
         CFSTR("com.hasmartboard.command"),
         NULL,
         CFNotificationSuspensionBehaviorDeliverImmediately);
+
+    // Ensure spool directory exists with 0777 permissions and process queued commands
+    NSString *spoolDir = @"/var/mobile/Library/hasmartboard-cmds";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:spoolDir]) {
+        NSDictionary *attrs = @{NSFilePosixPermissions: @(0777)};
+        [fm createDirectoryAtPath:spoolDir withIntermediateDirectories:YES attributes:attrs error:nil];
+        chmod([spoolDir UTF8String], 0777);
+    }
+    [self handleDarwinCommand];
 
     [self setupWebView];
 
@@ -467,65 +478,108 @@ NSString *authJS = [NSString stringWithFormat:
 
 #pragma mark - Darwin IPC Command Handler
 
-- (void)handleDarwinCommand {
-    NSString *path = @"/var/mobile/Library/hasmartboard-cmd.json";
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    if (!data) return;
-
-    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-
-    NSError *error = nil;
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    if (error || ![json isKindOfClass:[NSDictionary class]]) return;
-
-    NSString *action = json[@"action"];
-    id payloadObj = json[@"payload"];
-    NSString *payload = [payloadObj isKindOfClass:[NSString class]] ? payloadObj : @"";
-
-    if (!action) return;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([action isEqualToString:@"tts"]) {
-            NSString *text = payload;
-            if (text && text.length > 0) {
-                AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
-                utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"en-US"];
-                [self->_speechSynthesizer stopSpeakingAtBoundary:AV_SPEECH_BOUNDARY_IMMEDIATE];
-                [self->_speechSynthesizer speakUtterance:utterance];
+- (void)executeAppCommand:(NSString *)action payload:(NSString *)payload {
+    if ([action isEqualToString:@"tts"]) {
+        NSString *text = payload;
+        if (text && text.length > 0) {
+            AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+            utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"en-US"];
+            [self->_speechSynthesizer stopSpeakingAtBoundary:AV_SPEECH_BOUNDARY_IMMEDIATE];
+            [self->_speechSynthesizer speakUtterance:utterance];
+        }
+    } else if ([action isEqualToString:@"beep"]) {
+        AudioServicesPlaySystemSound(1005);
+    } else if ([action isEqualToString:@"reload"]) {
+        [self reloadDashboard];
+    } else if ([action isEqualToString:@"loadURL"]) {
+        if (payload && payload.length > 0) {
+            NSURL *url = [NSURL URLWithString:payload];
+            if (url) {
+                [self->_webView loadRequest:[NSURLRequest requestWithURL:url]];
             }
-        } else if ([action isEqualToString:@"beep"]) {
-            AudioServicesPlaySystemSound(1005);
-        } else if ([action isEqualToString:@"reload"]) {
+        }
+    } else if ([action isEqualToString:@"setScreen"]) {
+        if ([payload isEqualToString:@"ON"]) {
+            [self dismissScreensaver];
+        } else if ([payload isEqualToString:@"OFF"]) {
+            [self showScreensaver];
+        }
+    } else if ([action isEqualToString:@"setScreensaver"]) {
+        if ([payload isEqualToString:@"ON"]) {
+            [self showScreensaver];
+        } else if ([payload isEqualToString:@"OFF"]) {
+            [self dismissScreensaver];
+        }
+    } else if ([action isEqualToString:@"wake"]) {
+        [self dismissScreensaver];
+    } else if ([action isEqualToString:@"clearCache"]) {
+        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes]
+                                                   modifiedSince:[NSDate distantPast]
+                                               completionHandler:^{
             [self reloadDashboard];
-        } else if ([action isEqualToString:@"loadURL"]) {
-            if (payload && payload.length > 0) {
-                NSURL *url = [NSURL URLWithString:payload];
-                if (url) {
-                    [self->_webView loadRequest:[NSURLRequest requestWithURL:url]];
+        }];
+    }
+}
+
+- (void)handleDarwinCommand {
+    NSString *spoolDir = @"/var/mobile/Library/hasmartboard-cmds";
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    // 1. Process all spool files in alphabetical (chronological) order
+    if ([fm fileExistsAtPath:spoolDir]) {
+        NSError *err = nil;
+        NSArray *files = [fm contentsOfDirectoryAtPath:spoolDir error:&err];
+        if (!err && files && files.count > 0) {
+            NSMutableArray *cmdFiles = [NSMutableArray array];
+            for (NSString *file in files) {
+                if ([file hasPrefix:@"cmd-"] && [file hasSuffix:@".json"]) {
+                    [cmdFiles addObject:file];
                 }
             }
-        } else if ([action isEqualToString:@"setScreen"]) {
-            if ([payload isEqualToString:@"ON"]) {
-                [self dismissScreensaver];
-            } else if ([payload isEqualToString:@"OFF"]) {
-                [self showScreensaver];
+            [cmdFiles sortUsingSelector:@selector(compare:)];
+
+            for (NSString *fileName in cmdFiles) {
+                NSString *filePath = [spoolDir stringByAppendingPathComponent:fileName];
+                NSData *data = [NSData dataWithContentsOfFile:filePath];
+                [fm removeItemAtPath:filePath error:nil];
+                if (!data) continue;
+
+                NSError *jsonErr = nil;
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonErr];
+                if (jsonErr || ![json isKindOfClass:[NSDictionary class]]) continue;
+
+                NSString *action = json[@"action"];
+                id payloadObj = json[@"payload"];
+                NSString *payload = [payloadObj isKindOfClass:[NSString class]] ? payloadObj : @"";
+                if (!action) continue;
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self executeAppCommand:action payload:payload];
+                });
             }
-        } else if ([action isEqualToString:@"setScreensaver"]) {
-            if ([payload isEqualToString:@"ON"]) {
-                [self showScreensaver];
-            } else if ([payload isEqualToString:@"OFF"]) {
-                [self dismissScreensaver];
-            }
-        } else if ([action isEqualToString:@"wake"]) {
-            [self dismissScreensaver];
-        } else if ([action isEqualToString:@"clearCache"]) {
-            [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes]
-                                                       modifiedSince:[NSDate distantPast]
-                                                   completionHandler:^{
-                [self reloadDashboard];
-            }];
         }
-    });
+    }
+
+    // 2. Process legacy single file if present
+    NSString *legacyPath = @"/var/mobile/Library/hasmartboard-cmd.json";
+    if ([fm fileExistsAtPath:legacyPath]) {
+        NSData *data = [NSData dataWithContentsOfFile:legacyPath];
+        [fm removeItemAtPath:legacyPath error:nil];
+        if (data) {
+            NSError *jsonErr = nil;
+            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonErr];
+            if (!jsonErr && [json isKindOfClass:[NSDictionary class]]) {
+                NSString *action = json[@"action"];
+                id payloadObj = json[@"payload"];
+                NSString *payload = [payloadObj isKindOfClass:[NSString class]] ? payloadObj : @"";
+                if (action) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self executeAppCommand:action payload:payload];
+                    });
+                }
+            }
+        }
+    }
 }
 
 #pragma mark - Daemon Command Helper

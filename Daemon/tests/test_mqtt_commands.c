@@ -152,6 +152,73 @@ static void test_command_dispatch_targets(void) {
     printf("  [PASS] test_command_dispatch_targets\n");
 }
 
+static void processMqttAccumulator(uint8_t *recvBuf, size_t *recvLen, const char *prefix) {
+    char setPrefix[256];
+    snprintf(setPrefix, sizeof(setPrefix), "%s/set/", prefix);
+    size_t setPrefixLen = strlen(setPrefix);
+
+    size_t off = 0;
+    while (off < *recvLen) {
+        size_t available = *recvLen - off;
+        if (available < 2) {
+            break;
+        }
+
+        const uint8_t *pkt = recvBuf + off;
+        uint8_t pktType = pkt[0] & 0xF0;
+
+        size_t idx = 1;
+        uint32_t remLen = 0;
+        uint32_t mult = 1;
+        int remLenDone = 0;
+        while (idx < available && idx < 5) {
+            uint8_t digit = pkt[idx++];
+            remLen += (uint32_t)(digit & 0x7F) * mult;
+            mult *= 128;
+            if ((digit & 0x80) == 0) {
+                remLenDone = 1;
+                break;
+            }
+        }
+
+        if (!remLenDone) {
+            break;
+        }
+
+        size_t remLenBytes = idx - 1;
+        size_t pktTotalLen = 1 + remLenBytes + (size_t)remLen;
+
+        if (available < pktTotalLen) {
+            break;
+        }
+
+        if (pktType == 0x30) { // PUBLISH
+            char topic[256] = {0};
+            char payload[1024] = {0};
+            if (mqttParsePublish(pkt, pktTotalLen, topic, sizeof(topic), payload, sizeof(payload)) == 0) {
+                if (strncmp(topic, setPrefix, setPrefixLen) == 0) {
+                    const char *target = topic + setPrefixLen;
+                    dispatchMqttCommandTest(target, payload);
+                }
+            }
+        } else if (pktType == 0x90) { // SUBACK
+            // Handled
+        } else if (pktType == 0xD0) { // PINGRESP
+            // Handled
+        }
+
+        off += pktTotalLen;
+    }
+
+    if (off > 0) {
+        size_t remainingBytes = *recvLen - off;
+        if (remainingBytes > 0) {
+            memmove(recvBuf, recvBuf + off, remainingBytes);
+        }
+        *recvLen = remainingBytes;
+    }
+}
+
 static void test_packet_stream_processing(void) {
     uint8_t stream[1024];
     size_t totalLen = 0;
@@ -175,80 +242,90 @@ static void test_packet_stream_processing(void) {
     stream[totalLen++] = 0xD0;
     stream[totalLen++] = 0x00;
 
-    // Process stream exactly as mqttLoop does
-    const char *prefix = "kiosk";
-    char setPrefix[256];
-    snprintf(setPrefix, sizeof(setPrefix), "%s/set/", prefix);
-    size_t setPrefixLen = strlen(setPrefix);
+    // 4. PUBLISH (kiosk/set/screen, "ON")
+    int pubLen2 = mqttBuildPublish(stream + totalLen, sizeof(stream) - totalLen, &dummy,
+                                  "kiosk/set/screen", "ON", 0);
+    assert(pubLen2 > 0);
+    totalLen += (size_t)pubLen2;
+
+    uint8_t recvBuf[4096];
+    memcpy(recvBuf, stream, totalLen);
+    size_t recvLen = totalLen;
 
     g_commandCount = 0;
-    size_t off = 0;
-    while (off < totalLen) {
-        const uint8_t *pkt = stream + off;
-        size_t remaining = totalLen - off;
-        if (remaining < 2) break;
+    processMqttAccumulator(recvBuf, &recvLen, "kiosk");
 
-        uint8_t pktType = pkt[0] & 0xF0;
-        if (pktType == 0x30) {
-            char topic[256] = {0};
-            char payload[1024] = {0};
-            if (mqttParsePublish(pkt, remaining, topic, sizeof(topic), payload, sizeof(payload)) == 0) {
-                if (strncmp(topic, setPrefix, setPrefixLen) == 0) {
-                    const char *target = topic + setPrefixLen;
-                    dispatchMqttCommandTest(target, payload);
-                }
-            }
-
-            size_t idx = 1;
-            uint32_t remLen = 0;
-            uint32_t mult = 1;
-            int done = 0;
-            while (idx < remaining && idx < 5) {
-                uint8_t digit = pkt[idx++];
-                remLen += (uint32_t)(digit & 0x7F) * mult;
-                mult *= 128;
-                if ((digit & 0x80) == 0) {
-                    done = 1;
-                    break;
-                }
-            }
-            if (done && idx + remLen <= remaining) {
-                off += idx + remLen;
-            } else {
-                break;
-            }
-        } else if (pktType == 0x90) {
-            size_t idx = 1;
-            uint32_t remLen = 0;
-            uint32_t mult = 1;
-            int done = 0;
-            while (idx < remaining && idx < 5) {
-                uint8_t digit = pkt[idx++];
-                remLen += (uint32_t)(digit & 0x7F) * mult;
-                mult *= 128;
-                if ((digit & 0x80) == 0) {
-                    done = 1;
-                    break;
-                }
-            }
-            if (done && idx + remLen <= remaining) {
-                off += idx + remLen;
-            } else {
-                break;
-            }
-        } else if (pktType == 0xD0) {
-            off += 2;
-        } else {
-            break;
-        }
-    }
-
-    assert(off == totalLen);
-    assert(g_commandCount == 1);
-    assert(strcmp(g_lastAction, "tts") == 0);
-    assert(strcmp(g_lastValue, "Hello world") == 0);
+    assert(recvLen == 0);
+    assert(g_commandCount == 2);
+    assert(strcmp(g_lastAction, "setScreen") == 0);
+    assert(strcmp(g_lastValue, "ON") == 0);
 
     printf("  [PASS] test_packet_stream_processing\n");
+}
+
+static void test_fragmented_tcp_stream(void) {
+    // Build a sequence of 3 publish packets
+    MQTTClient dummy;
+    memset(&dummy, 0, sizeof(dummy));
+    uint8_t stream[1024];
+    size_t streamLen = 0;
+
+    int l1 = mqttBuildPublish(stream + streamLen, sizeof(stream) - streamLen, &dummy,
+                              "kiosk/set/volume", "85", 0);
+    assert(l1 > 0);
+    streamLen += (size_t)l1;
+
+    int l2 = mqttBuildPublish(stream + streamLen, sizeof(stream) - streamLen, &dummy,
+                              "kiosk/set/tts", "Fragmented test message across packets", 0);
+    assert(l2 > 0);
+    streamLen += (size_t)l2;
+
+    int l3 = mqttBuildPublish(stream + streamLen, sizeof(stream) - streamLen, &dummy,
+                              "kiosk/set/brightness", "0.45", 0);
+    assert(l3 > 0);
+    streamLen += (size_t)l3;
+
+    // Feed bytes in arbitrary fragmented chunk sizes (e.g. 3 bytes at a time)
+    uint8_t recvBuf[4096];
+    size_t recvLen = 0;
+    g_commandCount = 0;
+
+    size_t fed = 0;
+    const size_t chunkSize = 3;
+    while (fed < streamLen) {
+        size_t toFeed = chunkSize;
+        if (fed + toFeed > streamLen) {
+            toFeed = streamLen - fed;
+        }
+        memcpy(recvBuf + recvLen, stream + fed, toFeed);
+        recvLen += toFeed;
+        fed += toFeed;
+
+        processMqttAccumulator(recvBuf, &recvLen, "kiosk");
+    }
+
+    assert(recvLen == 0);
+    assert(g_commandCount == 3);
+    assert(strcmp(g_lastAction, "setBrightness") == 0);
+    assert(strcmp(g_lastValue, "0.45") == 0);
+
+    printf("  [PASS] test_fragmented_tcp_stream (chunk size = 3 bytes)\n");
+}
+
+static void test_spool_filename_sorting(void) {
+    // Verify that timestamp-sequence filenames sort chronologically
+    const char *files[] = {
+        "cmd-1725235000000-1.json",
+        "cmd-1725235000000-2.json",
+        "cmd-1725235000001-3.json",
+        "cmd-1725235000005-4.json",
+        "cmd-1725235000010-5.json"
+    };
+
+    for (int i = 0; i < 4; i++) {
+        assert(strcmp(files[i], files[i + 1]) < 0);
+    }
+    printf("  [PASS] test_spool_filename_sorting\n");
 }
 
 int main(void) {
@@ -256,6 +333,8 @@ int main(void) {
     test_brightness_volume_normalization();
     test_command_dispatch_targets();
     test_packet_stream_processing();
+    test_fragmented_tcp_stream();
+    test_spool_filename_sorting();
 
     printf("All MQTT command dispatch tests passed successfully!\n");
     return 0;

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -392,10 +393,117 @@ static void test_http_server_endpoints(void) {
     printf("  [PASS] HTTPServerStop\n");
 }
 
+#pragma mark - Concurrency Tests
+
+typedef struct {
+    int port;
+    int clientIndex;
+    int success;
+} ConcurrentClientArg;
+
+static void *concurrentClientWorker(void *arg) {
+    ConcurrentClientArg *carg = (ConcurrentClientArg *)arg;
+    char resp[1024] = {0};
+    int rc = -1;
+
+    if (carg->clientIndex % 3 == 0) {
+        rc = sendGET(carg->port, "/api/status", resp, sizeof(resp));
+        if (rc > 0 && strstr(resp, "200 OK") && strstr(resp, "\"battery\"")) {
+            carg->success = 1;
+        }
+    } else if (carg->clientIndex % 3 == 1) {
+        rc = sendGET(carg->port, "/api/health", resp, sizeof(resp));
+        if (rc > 0 && strstr(resp, "200 OK") && strstr(resp, "\"status\":\"ok\"")) {
+            carg->success = 1;
+        }
+    } else {
+        char body[128];
+        snprintf(body, sizeof(body), "{\"text\":\"Client %d\"}", carg->clientIndex);
+        rc = sendPOST(carg->port, "/api/tts", body, resp, sizeof(resp));
+        if (rc > 0 && strstr(resp, "200 OK") && strstr(resp, "\"status\":\"ok\"")) {
+            carg->success = 1;
+        }
+    }
+    return NULL;
+}
+
+static void test_concurrent_clients(void) {
+    TelemetrySnapshot snap;
+    memset(&snap, 0, sizeof(snap));
+    snap.uptimeSeconds = 1200;
+
+    HTTPServerConfig config;
+    memset(&config, 0, sizeof(config));
+    config.port = TEST_PORT;
+    config.snapshot = &snap;
+    config.commandHandler = mockCommandHandler;
+    config.wakeHandler = mockWakeHandler;
+
+    int rc = HTTPServerStart(&config);
+    assert(rc == 0);
+    usleep(50000);
+
+    // 1. Test 12 simultaneous client threads
+    #define NUM_CONCURRENT 12
+    pthread_t threads[NUM_CONCURRENT];
+    ConcurrentClientArg args[NUM_CONCURRENT];
+
+    for (int i = 0; i < NUM_CONCURRENT; i++) {
+        args[i].port = TEST_PORT;
+        args[i].clientIndex = i;
+        args[i].success = 0;
+        int pt_rc = pthread_create(&threads[i], NULL, concurrentClientWorker, &args[i]);
+        assert(pt_rc == 0);
+    }
+
+    for (int i = 0; i < NUM_CONCURRENT; i++) {
+        pthread_join(threads[i], NULL);
+        assert(args[i].success == 1);
+    }
+    printf("  [PASS] 12 concurrent requests completed successfully\n");
+
+    // 2. Slow client non-blocking test:
+    // Open slow connection fd, don't send data immediately.
+    int slowFD = socket(AF_INET, SOCK_STREAM, 0);
+    assert(slowFD >= 0);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)TEST_PORT);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    assert(connect(slowFD, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+
+    // Fast client connects while slow client holds socket open without writing
+    char fastResp[1024] = {0};
+    int fastRC = sendGET(TEST_PORT, "/api/health", fastResp, sizeof(fastResp));
+    assert(fastRC > 0);
+    assert(strstr(fastResp, "200 OK") != NULL);
+    printf("  [PASS] Fast client served while slow client is connected\n");
+
+    // Slow client sends request after delay
+    const char *slowReq = "GET /api/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    assert(write(slowFD, slowReq, strlen(slowReq)) == (ssize_t)strlen(slowReq));
+    char slowResp[1024] = {0};
+    size_t total = 0;
+    while (total < sizeof(slowResp) - 1) {
+        ssize_t n = read(slowFD, slowResp + total, sizeof(slowResp) - 1 - total);
+        if (n <= 0) break;
+        total += (size_t)n;
+    }
+    slowResp[total] = '\0';
+    close(slowFD);
+    assert(strstr(slowResp, "200 OK") != NULL);
+    printf("  [PASS] Slow client completed after delay\n");
+
+    HTTPServerStop();
+    printf("  [PASS] test_concurrent_clients\n");
+}
+
 int main(void) {
     printf("Running HTTPServer test suite...\n");
     test_json_extractor();
     test_http_server_endpoints();
+    test_concurrent_clients();
     printf("All HTTPServer tests passed successfully!\n");
     return 0;
 }

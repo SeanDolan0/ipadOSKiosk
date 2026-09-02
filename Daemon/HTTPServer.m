@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <poll.h>
@@ -340,6 +341,14 @@ static void handleClient(int clientFD) {
     close(clientFD);
 }
 
+#pragma mark - Client Worker Thread
+
+static void *clientWorkerThread(void *arg) {
+    int clientFD = (int)(intptr_t)arg;
+    handleClient(clientFD);
+    return NULL;
+}
+
 #pragma mark - Server Thread
 
 static void *serverThread(void *arg) {
@@ -360,11 +369,21 @@ static void *serverThread(void *arg) {
             if (clientFD < 0) continue;
 
             struct timeval tv;
-            tv.tv_sec = 1;
+            tv.tv_sec = 2;
             tv.tv_usec = 0;
             setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+            setsockopt(clientFD, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
 
-            handleClient(clientFD);
+            pthread_t clientThread;
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+            if (pthread_create(&clientThread, &attr, clientWorkerThread, (void *)(intptr_t)clientFD) != 0) {
+                // Fallback to synchronous handling if thread spawn fails
+                handleClient(clientFD);
+            }
+            pthread_attr_destroy(&attr);
         }
     }
     return NULL;
