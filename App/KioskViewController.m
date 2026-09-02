@@ -296,7 +296,30 @@ NSString *authJS = [NSString stringWithFormat:
 }
 
 - (void)settingsViewController:(SettingsViewController *)controller didSaveConfig:(NSDictionary *)config {
-    NSLog(@"KioskViewController: Settings saved");
+    NSLog(@"KioskViewController: Applying updated settings from in-app edit");
+
+    NSDictionary *haConfig = config[@"ha"];
+    NSString *newBaseURL = haConfig[@"url"] ?: @"http://192.168.50.150:8123";
+    NSString *newDashboardPath = haConfig[@"dashboardPath"] ?: @"/bedroom-kiosk/0";
+    NSString *newToken = haConfig[@"token"] ?: @"";
+
+    BOOL haChanged = ![_haBaseURL isEqualToString:newBaseURL] ||
+                     ![_dashboardPath isEqualToString:newDashboardPath] ||
+                     ![_haToken isEqualToString:newToken];
+
+    _haBaseURL = newBaseURL;
+    _dashboardPath = newDashboardPath;
+    _haToken = newToken;
+
+    if (haChanged) {
+        // Re-inject WKUserScripts with new token and reload dashboard
+        [_webView removeFromSuperview];
+        [self setupWebView];
+        [self loadDashboard];
+    }
+
+    // Apply screensaver updates immediately
+    [self resetIdleTimer];
 }
 
 #pragma mark - WKNavigationDelegate
