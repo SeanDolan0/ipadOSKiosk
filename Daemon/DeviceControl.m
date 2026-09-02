@@ -20,7 +20,11 @@ extern void BBSetBrightness(float value);
 #pragma mark - Brightness
 
 static void setBrightness(const char *value) {
-    float level = atof(value);
+    if (!value) return;
+    float level = (float)atof(value);
+    if (level > 1.0f) {
+        level = level / 100.0f;
+    }
     if (level < 0.0f) level = 0.0f;
     if (level > 1.0f) level = 1.0f;
     BBSetBrightness(level);
@@ -30,7 +34,11 @@ static void setBrightness(const char *value) {
 #pragma mark - Volume
 
 static void setVolume(const char *value) {
-    float level = atof(value);
+    if (!value) return;
+    float level = (float)atof(value);
+    if (level > 1.0f) {
+        level = level / 100.0f;
+    }
     if (level < 0.0f) level = 0.0f;
     if (level > 1.0f) level = 1.0f;
 
@@ -151,10 +159,51 @@ static void relaunchApp(void) {
     }
 }
 
+static void restartDaemon(void) {
+    syslog(LOG_NOTICE, "kioskd: restart requested");
+    exit(0);
+}
+
+#pragma mark - UI & Media Actions (Forwarded via IPC in Task 5)
+
+static void setScreen(const char *value) {
+    syslog(LOG_NOTICE, "kioskd: setScreen %s", value ? value : "");
+}
+
+static void setScreensaver(const char *value) {
+    syslog(LOG_NOTICE, "kioskd: setScreensaver %s", value ? value : "");
+}
+
+static void reloadApp(void) {
+    syslog(LOG_NOTICE, "kioskd: reload requested");
+}
+
+static void wakeDevice(void) {
+    syslog(LOG_NOTICE, "kioskd: wake requested");
+}
+
+static void beepDevice(void) {
+    syslog(LOG_NOTICE, "kioskd: beep requested");
+}
+
+static void clearCache(void) {
+    syslog(LOG_NOTICE, "kioskd: clearCache requested");
+}
+
+static void speakTTS(const char *value) {
+    syslog(LOG_NOTICE, "kioskd: tts '%s'", value ? value : "");
+}
+
+static void loadURL(const char *value) {
+    syslog(LOG_NOTICE, "kioskd: loadURL '%s'", value ? value : "");
+}
+
 #pragma mark - Public API
 
 void DeviceControlExecute(const char *action, const char *value, void *context) {
     (void)context;
+
+    if (!action) return;
 
     if (strcmp(action, "setBrightness") == 0) setBrightness(value);
     else if (strcmp(action, "setVolume") == 0) setVolume(value);
@@ -165,6 +214,15 @@ void DeviceControlExecute(const char *action, const char *value, void *context) 
     else if (strcmp(action, "lockOrientation") == 0) lockOrientation(value);
     else if (strcmp(action, "reboot") == 0) rebootDevice();
     else if (strcmp(action, "relaunchApp") == 0) relaunchApp();
+    else if (strcmp(action, "restartDaemon") == 0) restartDaemon();
+    else if (strcmp(action, "setScreen") == 0) setScreen(value);
+    else if (strcmp(action, "setScreensaver") == 0) setScreensaver(value);
+    else if (strcmp(action, "reload") == 0) reloadApp();
+    else if (strcmp(action, "wake") == 0) wakeDevice();
+    else if (strcmp(action, "beep") == 0) beepDevice();
+    else if (strcmp(action, "clearCache") == 0) clearCache();
+    else if (strcmp(action, "tts") == 0) speakTTS(value);
+    else if (strcmp(action, "loadURL") == 0) loadURL(value);
     else {
         syslog(LOG_WARNING, "kioskd: unknown command '%s'", action);
     }
