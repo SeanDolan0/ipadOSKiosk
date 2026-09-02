@@ -2,6 +2,7 @@
 #import "ScreensaverView.h"
 #import "NetworkMonitor.h"
 #import "DaemonBridge.h"
+#import "SettingsViewController.h"
 
 #define PREFS_PATH @"/var/mobile/Library/Preferences/com.hasmartboard.plist"
 
@@ -29,6 +30,16 @@
     _daemonBridge = [[DaemonBridge alloc] init];
 
     [self setupWebView];
+
+    UITapGestureRecognizer *settingsGesture = [[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(openSettings)];
+    settingsGesture.numberOfTapsRequired = 4;
+
+    UIView *hotspotView = [[UIView alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 80, 0, 80, 80)];
+    hotspotView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
+    hotspotView.backgroundColor = [UIColor clearColor];
+    [hotspotView addGestureRecognizer:settingsGesture];
+    [self.view addSubview:hotspotView];
 
     _screensaver = [[ScreensaverView alloc] initWithFrame:self.view.bounds];
     _screensaver.delegate = self;
@@ -257,10 +268,35 @@ NSString *authJS = [NSString stringWithFormat:
     [self resetIdleTimer];
 }
 
+#pragma mark - Settings
+
+- (void)openSettings {
+    SettingsViewController *settingsVC = [[SettingsViewController alloc] init];
+    settingsVC.delegate = self;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settingsVC];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
 #pragma mark - ScreensaverViewDelegate
 
 - (void)screensaverDidReceiveTouch {
     [self dismissScreensaver];
+}
+
+- (void)screensaverDidRequestSettings {
+    [self dismissScreensaver];
+    [self openSettings];
+}
+
+#pragma mark - SettingsViewControllerDelegate
+
+- (void)settingsViewControllerDidCancel:(SettingsViewController *)controller {
+    NSLog(@"KioskViewController: Settings dismissed without changes");
+}
+
+- (void)settingsViewController:(SettingsViewController *)controller didSaveConfig:(NSDictionary *)config {
+    NSLog(@"KioskViewController: Settings saved");
 }
 
 #pragma mark - WKNavigationDelegate

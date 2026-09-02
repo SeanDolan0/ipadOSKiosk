@@ -60,13 +60,31 @@
 }
 
 - (void)setupGesture {
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
+    UITapGestureRecognizer *wakeTap = [[UITapGestureRecognizer alloc]
         initWithTarget:self action:@selector(handleTap:)];
-    [self addGestureRecognizer:tap];
+    wakeTap.numberOfTapsRequired = 1;
+
+    UITapGestureRecognizer *settingsTap = [[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleSettingsTap:)];
+    settingsTap.numberOfTapsRequired = 4;
+
+    [wakeTap requireGestureRecognizerToFail:settingsTap];
+
+    [self addGestureRecognizer:settingsTap];
+    [self addGestureRecognizer:wakeTap];
 }
 
 - (void)handleTap:(UITapGestureRecognizer *)recognizer {
     [self.delegate screensaverDidReceiveTouch];
+}
+
+- (void)handleSettingsTap:(UITapGestureRecognizer *)recognizer {
+    CGPoint point = [recognizer locationInView:self];
+    if (point.x >= (self.bounds.size.width - 100) && point.y <= 100) {
+        [self.delegate screensaverDidRequestSettings];
+    } else {
+        [self.delegate screensaverDidReceiveTouch];
+    }
 }
 
 #pragma mark - Configuration

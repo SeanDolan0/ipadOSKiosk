@@ -2,6 +2,7 @@
 
 @protocol ScreensaverViewDelegate <NSObject>
 - (void)screensaverDidReceiveTouch;
+- (void)screensaverDidRequestSettings;
 @end
 
 @interface ScreensaverView : UIView
