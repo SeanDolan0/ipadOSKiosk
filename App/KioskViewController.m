@@ -18,6 +18,7 @@
     NSString *_haBaseURL;
     NSString *_haToken;
     NSString *_dashboardPath;
+    UIView *_hotspotView;
 }
 
 - (void)viewDidLoad {
@@ -33,13 +34,25 @@
 
     UITapGestureRecognizer *settingsGesture = [[UITapGestureRecognizer alloc]
         initWithTarget:self action:@selector(openSettings)];
-    settingsGesture.numberOfTapsRequired = 4;
+    settingsGesture.numberOfTapsRequired = 3;
 
-    UIView *hotspotView = [[UIView alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 60, 0, 60, 60)];
-    hotspotView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
-    hotspotView.backgroundColor = [UIColor clearColor];
-    [hotspotView addGestureRecognizer:settingsGesture];
-    [self.view addSubview:hotspotView];
+    UITapGestureRecognizer *settingsGesture4 = [[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(openSettings)];
+    settingsGesture4.numberOfTapsRequired = 4;
+
+    _hotspotView = [[UIView alloc] init];
+    _hotspotView.backgroundColor = [UIColor clearColor];
+    _hotspotView.translatesAutoresizingMaskIntoConstraints = NO;
+    [_hotspotView addGestureRecognizer:settingsGesture];
+    [_hotspotView addGestureRecognizer:settingsGesture4];
+    [self.view addSubview:_hotspotView];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [_hotspotView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [_hotspotView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_hotspotView.widthAnchor constraintEqualToConstant:100],
+        [_hotspotView.heightAnchor constraintEqualToConstant:100]
+    ]];
 
     _screensaver = [[ScreensaverView alloc] initWithFrame:self.view.bounds];
     _screensaver.delegate = self;
@@ -68,6 +81,8 @@
     [super viewDidLayoutSubviews];
     _webView.frame = self.view.bounds;
     _screensaver.frame = self.view.bounds;
+    [self.view bringSubviewToFront:_hotspotView];
+    [self.view bringSubviewToFront:_screensaver];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size

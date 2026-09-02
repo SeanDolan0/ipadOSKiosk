@@ -66,11 +66,17 @@
 
     UITapGestureRecognizer *settingsTap = [[UITapGestureRecognizer alloc]
         initWithTarget:self action:@selector(handleSettingsTap:)];
-    settingsTap.numberOfTapsRequired = 4;
+    settingsTap.numberOfTapsRequired = 3;
+
+    UITapGestureRecognizer *settingsTap4 = [[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleSettingsTap:)];
+    settingsTap4.numberOfTapsRequired = 4;
 
     [wakeTap requireGestureRecognizerToFail:settingsTap];
+    [wakeTap requireGestureRecognizerToFail:settingsTap4];
 
     [self addGestureRecognizer:settingsTap];
+    [self addGestureRecognizer:settingsTap4];
     [self addGestureRecognizer:wakeTap];
 }
 
@@ -80,7 +86,7 @@
 
 - (void)handleSettingsTap:(UITapGestureRecognizer *)recognizer {
     CGPoint point = [recognizer locationInView:self];
-    if (point.x >= (self.bounds.size.width - 60) && point.y <= 60) {
+    if (point.x >= (self.bounds.size.width - 100) && point.y <= 100) {
         [self.delegate screensaverDidRequestSettings];
     } else {
         [self.delegate screensaverDidReceiveTouch];
