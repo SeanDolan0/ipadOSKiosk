@@ -16,7 +16,7 @@
 #include "MQTTClient.h"
 #include "MQTTTelemetry.h"
 
-#define HTTP_PORT 9090
+#define HTTP_PORT 8080
 #define TELEMETRY_INTERVAL 30
 
 static volatile int g_running = 1;
