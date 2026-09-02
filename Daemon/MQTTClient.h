@@ -31,6 +31,9 @@ int mqttEncodeString(uint8_t *out, const char *s);
 // clean session, keepalive). Returns total packet length or -1 if it doesn't fit.
 int mqttBuildConnect(uint8_t *out, size_t cap, const MQTTClient *c);
 
+// Builds a SUBSCRIBE (QoS 0 requested) packet. Returns total packet length or -1 if it doesn't fit.
+int mqttBuildSubscribe(uint8_t *out, size_t cap, uint16_t packetId, const char *topicFilter);
+
 // Builds a PUBLISH (QoS 0) packet. retain = 1 sets the retain flag. Returns length or -1.
 int mqttBuildPublish(uint8_t *out, size_t cap, const MQTTClient *c,
                      const char *topic, const char *payload, int retain);
@@ -38,6 +41,11 @@ int mqttBuildPublish(uint8_t *out, size_t cap, const MQTTClient *c,
 // Parses a CONNACK (must be >= 4 bytes). Stores return code (0 = accepted).
 // Returns 0 on parse success (even if returnCode != 0).
 int mqttParseConnack(const uint8_t *pkt, size_t len, int *returnCode);
+
+// Parses a PUBLISH packet (QoS 0). Extracts topic and payload as null-terminated strings.
+// Returns 0 on parse success, or -1 on parse failure.
+int mqttParsePublish(const uint8_t *pkt, size_t len, char *topicOut, size_t topicCap,
+                     char *payloadOut, size_t payloadCap);
 
 // Transport: TCP connect + MQTT CONNECT handshake. Returns 0 on success,
 // nonzero otherwise. On success c->sockfd is a connected socket.

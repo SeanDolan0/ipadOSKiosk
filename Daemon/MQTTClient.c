@@ -71,6 +71,27 @@ int mqttBuildConnect(uint8_t *out, size_t cap, const MQTTClient *c) {
     return (int)total;
 }
 
+int mqttBuildSubscribe(uint8_t *out, size_t cap, uint16_t packetId, const char *topicFilter) {
+    if (!out || !topicFilter) return -1;
+    size_t topicLen = strlen(topicFilter);
+    if (topicLen > 65535) return -1;
+
+    size_t rem = 2 + (2 + topicLen) + 1; // packetId (2) + topic string (2 + len) + requested QoS (1)
+    uint8_t rl[4];
+    int rln = mqttEncodeRemainingLength(rl, (int)rem);
+    size_t total = 1 + (size_t)rln + rem;
+    if (total > cap) return -1;
+
+    out[0] = 0x82; // SUBSCRIBE fixed header (QoS 1 per MQTT 3.1.1 spec)
+    memcpy(out + 1, rl, (size_t)rln);
+    size_t off = 1 + (size_t)rln;
+    out[off++] = (uint8_t)((packetId >> 8) & 0xFF);
+    out[off++] = (uint8_t)(packetId & 0xFF);
+    off += (size_t)mqttEncodeString(out + off, topicFilter);
+    out[off++] = 0x00; // Requested QoS 0
+    return (int)total;
+}
+
 int mqttBuildPublish(uint8_t *out, size_t cap, const MQTTClient *c,
                      const char *topic, const char *payload, int retain) {
     (void)c;
@@ -93,6 +114,52 @@ int mqttParseConnack(const uint8_t *pkt, size_t len, int *returnCode) {
     if (len < 4) return -1;
     if (pkt[0] != 0x20) return -1;           // CONNACK
     *returnCode = pkt[3];
+    return 0;
+}
+
+int mqttParsePublish(const uint8_t *pkt, size_t len, char *topicOut, size_t topicCap,
+                     char *payloadOut, size_t payloadCap) {
+    if (!pkt || len < 4 || !topicOut || topicCap == 0 || !payloadOut || payloadCap == 0) return -1;
+    if ((pkt[0] & 0xF0) != 0x30) return -1; // Not PUBLISH
+
+    size_t idx = 1;
+    // Decode variable-length remaining length
+    uint32_t remLen = 0;
+    uint32_t mult = 1;
+    int done = 0;
+    while (idx < len && idx < 5) {
+        uint8_t digit = pkt[idx++];
+        remLen += (uint32_t)(digit & 0x7F) * mult;
+        mult *= 128;
+        if ((digit & 0x80) == 0) {
+            done = 1;
+            break;
+        }
+    }
+    if (!done) return -1;
+    if (idx + remLen > len) return -1;
+
+    if (idx + 2 > len) return -1;
+    size_t topicLen = ((size_t)pkt[idx] << 8) | (size_t)pkt[idx + 1];
+    idx += 2;
+    if (topicLen >= topicCap || idx + topicLen > len) return -1;
+
+    memcpy(topicOut, pkt + idx, topicLen);
+    topicOut[topicLen] = '\0';
+    idx += topicLen;
+
+    // For QoS 0, there is no packet identifier; payload is remaining bytes
+    if (remLen < 2 + topicLen) return -1;
+    size_t payloadLen = remLen - (2 + topicLen);
+    if (idx + payloadLen > len) return -1;
+
+    if (payloadLen >= payloadCap) {
+        payloadLen = payloadCap - 1;
+    }
+    if (payloadLen > 0) {
+        memcpy(payloadOut, pkt + idx, payloadLen);
+    }
+    payloadOut[payloadLen] = '\0';
     return 0;
 }
 
