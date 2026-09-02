@@ -1,6 +1,8 @@
 #ifndef TelemetryCollector_h
 #define TelemetryCollector_h
+#if defined(__OBJC__) || defined(__APPLE__)
 #import <Foundation/Foundation.h>
+#endif
 
 // ponytail: flat C struct, no NSObject overhead in hot path
 typedef struct {
