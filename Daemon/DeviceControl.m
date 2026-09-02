@@ -8,6 +8,8 @@
 #include <signal.h>
 #include <sys/syslog.h>
 #include <dlfcn.h>
+#include <notify.h>
+#include <sys/stat.h>
 
 // RB_AUTOBOOT not in iOS SDK headers, defined in BSD <sys/reboot.h>
 #ifndef RB_AUTOBOOT
@@ -164,38 +166,68 @@ static void restartDaemon(void) {
     exit(0);
 }
 
-#pragma mark - UI & Media Actions (Forwarded via IPC in Task 5)
+#pragma mark - App IPC Dispatch
+
+static void dispatchAppCommand(const char *action, const char *value) {
+    if (!action) return;
+    @autoreleasepool {
+        NSString *actionStr = [NSString stringWithUTF8String:action];
+        NSString *valueStr = value ? [NSString stringWithUTF8String:value] : @"";
+        NSDictionary *payload = @{
+            @"action": actionStr,
+            @"payload": valueStr
+        };
+        NSError *error = nil;
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&error];
+        if (!error && jsonData) {
+            NSString *cmdPath = @"/var/mobile/Library/hasmartboard-cmd.json";
+            [jsonData writeToFile:cmdPath atomically:YES];
+            chmod([cmdPath UTF8String], 0666);
+            notify_post("com.hasmartboard.command");
+            syslog(LOG_NOTICE, "kioskd: dispatched app IPC command '%s'", action);
+        } else {
+            syslog(LOG_ERR, "kioskd: failed to serialize IPC command '%s'", action);
+        }
+    }
+}
+
+#pragma mark - UI & Media Actions (Forwarded via IPC)
 
 static void setScreen(const char *value) {
-    syslog(LOG_NOTICE, "kioskd: setScreen %s", value ? value : "");
+    if (value && strcmp(value, "OFF") == 0) {
+        BBSetBrightness(0.0f);
+    } else if (value && strcmp(value, "ON") == 0) {
+        BBSetBrightness(0.8f);
+    }
+    dispatchAppCommand("setScreen", value);
 }
 
 static void setScreensaver(const char *value) {
-    syslog(LOG_NOTICE, "kioskd: setScreensaver %s", value ? value : "");
+    dispatchAppCommand("setScreensaver", value);
 }
 
 static void reloadApp(void) {
-    syslog(LOG_NOTICE, "kioskd: reload requested");
+    dispatchAppCommand("reload", NULL);
 }
 
 static void wakeDevice(void) {
-    syslog(LOG_NOTICE, "kioskd: wake requested");
+    dispatchAppCommand("wake", NULL);
 }
 
 static void beepDevice(void) {
-    syslog(LOG_NOTICE, "kioskd: beep requested");
+    dispatchAppCommand("beep", NULL);
 }
 
 static void clearCache(void) {
-    syslog(LOG_NOTICE, "kioskd: clearCache requested");
+    dispatchAppCommand("clearCache", NULL);
 }
 
 static void speakTTS(const char *value) {
-    syslog(LOG_NOTICE, "kioskd: tts '%s'", value ? value : "");
+    dispatchAppCommand("tts", value);
 }
 
 static void loadURL(const char *value) {
-    syslog(LOG_NOTICE, "kioskd: loadURL '%s'", value ? value : "");
+    dispatchAppCommand("loadURL", value);
 }
 
 #pragma mark - Public API

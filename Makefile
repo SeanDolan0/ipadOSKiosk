@@ -21,10 +21,11 @@ HASmartboard_FILES = \
     App/SettingsViewController.m \
     App/ScreensaverView.m \
     App/NetworkMonitor.m \
-    App/DaemonBridge.m
+    App/DaemonBridge.m \
+    Daemon/MQTTClient.c
 
-HASmartboard_CFLAGS = -IApp -fobjc-arc
-HASmartboard_FRAMEWORKS = UIKit Foundation WebKit CoreGraphics IOKit
+HASmartboard_CFLAGS = -IApp -IDaemon -fobjc-arc
+HASmartboard_FRAMEWORKS = UIKit Foundation WebKit CoreGraphics IOKit AVFoundation AudioToolbox
 HASmartboard_PRIVATE_FRAMEWORKS = BackBoardServices
 HASmartboard_RESOURCE_FILES = HASmartboard/Info.plist Resources/SwipeNav.js
 

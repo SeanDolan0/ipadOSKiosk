@@ -3,14 +3,27 @@
 #import "NetworkMonitor.h"
 #import "DaemonBridge.h"
 #import "SettingsViewController.h"
+#import <AVFoundation/AVFoundation.h>
+#import <AudioToolbox/AudioToolbox.h>
+#import <notify.h>
 
 #define PREFS_PATH @"/var/mobile/Library/Preferences/com.hasmartboard.plist"
+
+static void onDarwinCommandCallback(CFNotificationCenterRef center,
+                                    void *observer,
+                                    CFStringRef name,
+                                    const void *object,
+                                    CFDictionaryRef userInfo) {
+    KioskViewController *vc = (__bridge KioskViewController *)observer;
+    [vc handleDarwinCommand];
+}
 
 @implementation KioskViewController {
     WKWebView *_webView;
     ScreensaverView *_screensaver;
     NetworkMonitor *_networkMonitor;
     DaemonBridge *_daemonBridge;
+    AVSpeechSynthesizer *_speechSynthesizer;
     NSTimer *_wakeTimer;
     NSTimer *_idleTimer;
     BOOL _screensaverActive;
@@ -29,6 +42,24 @@
 
     _networkMonitor = [[NetworkMonitor alloc] init];
     _daemonBridge = [[DaemonBridge alloc] init];
+
+    // Configure Audio Session for Playback with ducking
+    NSError *audioError = nil;
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback
+                                     withOptions:AVAudioSessionCategoryOptionDuckOthers
+                                           error:&audioError];
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
+
+    _speechSynthesizer = [[AVSpeechSynthesizer alloc] init];
+
+    // Register Darwin notification observer for app IPC commands
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        (__bridge const void *)(self),
+        onDarwinCommandCallback,
+        CFSTR("com.hasmartboard.command"),
+        NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately);
 
     [self setupWebView];
 
@@ -409,6 +440,69 @@ NSString *authJS = [NSString stringWithFormat:
     }
 }
 
+#pragma mark - Darwin IPC Command Handler
+
+- (void)handleDarwinCommand {
+    NSString *path = @"/var/mobile/Library/hasmartboard-cmd.json";
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return;
+
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+
+    NSError *error = nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (error || ![json isKindOfClass:[NSDictionary class]]) return;
+
+    NSString *action = json[@"action"];
+    id payloadObj = json[@"payload"];
+    NSString *payload = [payloadObj isKindOfClass:[NSString class]] ? payloadObj : @"";
+
+    if (!action) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([action isEqualToString:@"tts"]) {
+            NSString *text = payload;
+            if (text && text.length > 0) {
+                AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+                utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"en-US"];
+                [self->_speechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+                [self->_speechSynthesizer speakUtterance:utterance];
+            }
+        } else if ([action isEqualToString:@"beep"]) {
+            AudioServicesPlaySystemSound(1005);
+        } else if ([action isEqualToString:@"reload"]) {
+            [self reloadDashboard];
+        } else if ([action isEqualToString:@"loadURL"]) {
+            if (payload && payload.length > 0) {
+                NSURL *url = [NSURL URLWithString:payload];
+                if (url) {
+                    [self->_webView loadRequest:[NSURLRequest requestWithURL:url]];
+                }
+            }
+        } else if ([action isEqualToString:@"setScreen"]) {
+            if ([payload isEqualToString:@"ON"]) {
+                [self dismissScreensaver];
+            } else if ([payload isEqualToString:@"OFF"]) {
+                [self showScreensaver];
+            }
+        } else if ([action isEqualToString:@"setScreensaver"]) {
+            if ([payload isEqualToString:@"ON"]) {
+                [self showScreensaver];
+            } else if ([payload isEqualToString:@"OFF"]) {
+                [self dismissScreensaver];
+            }
+        } else if ([action isEqualToString:@"wake"]) {
+            [self dismissScreensaver];
+        } else if ([action isEqualToString:@"clearCache"]) {
+            [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes]
+                                                       modifiedSince:[NSDate distantPast]
+                                                   completionHandler:^{
+                [self reloadDashboard];
+            }];
+        }
+    });
+}
+
 #pragma mark - Daemon Command Helper
 
 - (void)postCommand:(NSString *)action value:(NSString *)value {
@@ -431,6 +525,11 @@ NSString *authJS = [NSString stringWithFormat:
 }
 
 - (void)dealloc {
+    CFNotificationCenterRemoveObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        (__bridge const void *)(self),
+        CFSTR("com.hasmartboard.command"),
+        NULL);
     [_wakeTimer invalidate];
     [_idleTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
