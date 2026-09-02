@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 HA Smartboard — Home Assistant kiosk dashboard for a jailbroken iPad Mini 2 (arm64, iPadOS 12.5.8), built with Theos. Two binaries ship in one `.deb` package (`com.hasmartboard`, version in `control`):
 
-- **HASmartboard** — UIKit app (`App/`). Full-screen WKWebView loading the HA Lovelace dashboard, plus ScreensaverView, NetworkMonitor, and telemetry relay.
+- **HASmartboard** — UIKit app (`App/`). Full-screen WKWebView loading the HA Lovelace dashboard, plus ScreensaverView, NetworkMonitor, and SettingsViewController.
 - **kioskd** — root launchd daemon (`Daemon/`). Collects telemetry (battery, WiFi, storage, memory), serves it over localhost HTTP, and applies device-control commands.
 
 ## Build & deploy (on the iPad — the only supported method)
@@ -33,9 +33,15 @@ Everything must be built on the iPad with Theos. Cross-compiling elsewhere and c
 - App → daemon IPC: `App/KioskViewController` polls `127.0.0.1:9090/health` (via `/wake` stub) for screensaver wake. `App/TelemetryRelay.m` is **removed**.
 - Telemetry path: `kioskd → MQTT → HA`. The daemon runs a hand-rolled MQTT client (`Daemon/MQTTClient.c`, BSD sockets, QoS 0 publish-only, dependency-free) that publishes discovery and state to the HA broker every 30s (config `mqtt.interval`), with a 1–30s reconnect backoff and LWT on `kiosk/status`.
 
-## Configuration
+## Configuration & In-App Settings
 
 - App config is read at launch from `/var/mobile/Library/Preferences/com.hasmartboard.plist` (`ha.url`, `ha.token`, `ha.dashboardPath`; screensaver keys) in `App/KioskViewController.m:loadHAConfig`; code defaults in that method are the fallback (URL `http://192.168.50.150:8123`, dashboard `/bedroom-kiosk/0`, empty token). **Never commit a real HA token or MQTT password** — they live only in the device plist (schema: `config.plist.example`).
+- **Trigger Gesture**: 4 rapid taps within the top-right corner hotspot (overlay on `KioskViewController` or top-right touch in `ScreensaverView`) opens the in-app Settings modal without interfering with single-tap screensaver wake.
+- **Settings UI (`App/SettingsViewController.m`)**: Grouped `UITableViewController` presented modally (`UIModalPresentationFormSheet`) in a `UINavigationController`.
+  - **Home Assistant**: URL, Dashboard path, masked token field (never logged).
+  - **Screensaver**: Mode (`clock` or `photo`), idle timeout (seconds), dim brightness (0.0–1.0), photo URLs (comma-separated).
+  - **Diagnostics**: "Test Connection" button performs asynchronous health checks against both Home Assistant (`GET /api/` reachability) and kioskd daemon (`GET http://127.0.0.1:9090/health`) with inline status reporting.
+- **Persistence & Live Reload**: Settings are persisted atomically to `/var/mobile/Library/Preferences/com.hasmartboard.plist` (`writeToFile:atomically:`). On save, `SettingsViewControllerDelegate` (`settingsViewController:didSaveConfig:`) notifies `KioskViewController` to update in-memory state, reconfigure `ScreensaverView` / idle timer immediately, and reload the WKWebView with new auth tokens without restarting the app.
 
 ## Conventions
 
