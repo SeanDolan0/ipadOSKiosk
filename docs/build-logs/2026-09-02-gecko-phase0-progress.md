@@ -66,3 +66,31 @@ then copied to Windows for Theos integration (or the whole Theos build could als
 3. Clone mozilla-central (or gecko-tls fork with iOS patches).
 4. Create iOS 12.0 mozconfig, run ./mach build -> libxul.
 5. Copy artifacts back to this repo under Gecko/ (gitignored until needed).
+
+---
+
+## SEPARATE BRANCH: qwen-local-agent (2026-09-02)
+
+Created branch `qwen-local-agent` forked from `Gecko-Rewrite` for an isolated
+local-quantized-LLM agent sandbox.
+
+**User request**: build an environment to run `Qwen3.8-27B-UD-Q2_K_XL.gguf`
+(Unsloth, 9.83 GB Q2_K_XL) on a Ralph loop, using llama.cpp runtime with
+opencode (which gives tools + MCP) as the harness. Kept on its own branch so
+the smaller/riskier model can't corrupt Gecko work it can't be monitored for.
+
+**What was built** (committed 340bb58, branch qwen-local-agent):
+- scripts/agent/download-model.ps1 (resumable HF fetch of the 9.83 GB GGUF)
+- scripts/agent/serve.ps1 (llama-server on 127.0.0.1:8080, flags validated)
+- scripts/agent/start-opencode.ps1 (verify server + launch opencode)
+- AI_AGENT_ENV.md (authoritative handoff)
+- docs/ralph-loop-usage.md (bounded ralph-loop patterns)
+- .gitignore: /models/ (9.83 GB GGUF never committed)
+
+**Environment facts verified**: 32GB RAM (fits model + 32k ctx), no discrete GPU
+(CPU-only, serve uses -ngl 0), llama-server installed via WinGet build 10507,
+opencode global config ALREADY has provider local/qwen3.8 -> http://localhost:8080/v1.
+
+**Not done (needs user)**: the 9.83 GB model download + first-run sanity check.
+Run: .\scripts\agent\download-model.ps1 then .\scripts\agent\serve.ps1
+then .\scripts\agent\start-opencode.ps1
