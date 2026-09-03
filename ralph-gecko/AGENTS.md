@@ -52,6 +52,10 @@ export TARGET=  # do NOT override with a stale value; follow the template
 ## Signs (things Ralph keeps getting wrong — add to this list)
 - FULL STEPS + VERBATIM ERRORS ONLY. NO FABRICATED SUCCESS.
 - ONE ITEM PER ITERATION.
+- SMALL STEPS ONLY. This model is modest with a small context. Never attempt a
+  whole multi-hour build or a full clone in one shot. Split into the smallest
+  verifiable step; redirect big command output to `docs/build-logs/` and read
+  back only the FIRST error line. Leave a "next: ..." note when you stop mid-step.
 - Don't re-derive the mozconfig; START from the template and change only what a
   real configure error tells you to change.
 - `--enable-application=embed` may be renamed in modern mozilla-central — VERIFY

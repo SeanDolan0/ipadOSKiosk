@@ -29,6 +29,10 @@ the `arm64-apple-ios12.0` target. This is the foundation every later phase build
    - `--disable-jit --disable-jemalloc` (iOS has no JIT; kiosk needs no jemalloc)
 
 ## Ordered task list (seeded; the loop advances one at a time)
+> The coarse checkboxes below are the MILESTONES. The fine-grained, one-per-
+> iteration working list lives in `IMPLEMENTATION_PLAN.md` — always split a
+> milestone into many tiny steps there; never tackle one of these whole.
+
 - [ ] Determine how to reach the Mac over the network from this Windows box
       (SSH hostname/IP) so artifacts/docs can move between them.
 - [ ] On the Mac: confirm Xcode + iOS SDK version; install `rustup` and the

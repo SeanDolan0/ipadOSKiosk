@@ -34,7 +34,17 @@ Everything you need is in these files. Read them IN ORDER at the start of every 
 - NEVER fabricate a build success or paste an error you did not actually see.
 - NEVER commit build artifacts / the mozilla source tree / .gguf models.
 - ONE task per iteration. Do not batch checklist items.
+- **KEEP EVERY STEP TINY.** You have a small context window and modest ability.
+  Pick the smallest possible next step. If the item you chose would flood your
+  context (huge command output, a long clone, a multi-hour build), do NOT run it
+  end-to-end in one shot. Split it into a smaller step first — e.g. save the
+  command you plan to run and the single first result, then stop.
+- Running a long command is fine, but PIPING/SAVING its output to a file and
+  reading back only the FIRST error line beats letting the whole thing flood
+  your window. Always `tee` or redirect to `docs/build-logs/` and read the tail.
 - When stuck on a config decision, prefer the option recorded in `specs/*` or
   `IMPLEMENTATION_PLAN.md`. Do not silently change an approved decision.
 - Phase 0 runs on macOS with Xcode. On a non-macOS host, research/plan and write
   scripts only — do not claim a Mac-only build result.
+- If an iteration ends mid-step, leave the plan updated with a clear "next: ..."
+  note so the NEXT (memory-less) iteration can pick up without re-reading the world.
