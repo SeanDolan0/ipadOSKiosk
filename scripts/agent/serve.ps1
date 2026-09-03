@@ -103,7 +103,7 @@ $isReady = $false
 while ($sw.Elapsed.TotalSeconds -lt $maxWaitSec) {
     Start-Sleep -Seconds 3
     if ($serverProcess.HasExited) {
-        Write-Error "llama-server exited before becoming ready (exit code $($serverProcess.ExitCode)). Check the server window for details."
+        Write-Error "The detached wrapper process (powershell.exe -NoExit) exited before readiness (wrapper exit code: $($serverProcess.ExitCode)). With -NoExit, a llama-server startup failure does NOT exit this wrapper - its window stays open at a prompt showing the error. So this branch fires only if the detached window itself was closed; re-run serve.ps1 to capture the startup error."
     }
     try {
         $m = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/models" -TimeoutSec 2

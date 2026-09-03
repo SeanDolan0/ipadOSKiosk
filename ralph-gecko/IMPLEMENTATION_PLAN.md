@@ -10,7 +10,7 @@ have run the script.
 - [x] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
 - [x] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
 - [x] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
-- [ ] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
+- [x] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
 - [ ] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
 - [ ] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
 - [ ] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
@@ -19,7 +19,11 @@ have run the script.
 (none yet)
 
 ## Discovered along the way
-(loop appends blockers/gotchas/new sub-tasks here)
+- (Windows-only, NOT applied) To make the loop fast-fail on a real llama-server
+  startup death: append `; exit $LastExitCode` to `$commandLine` (`serve.ps1:94`) so
+  the wrapper exits with llama-server's code — and verify on a Windows machine that
+  an explicit `exit` actually terminates the process despite `-NoExit`. Requires a
+  Windows host; out of scope for this Mac loop (static review only).
 
 ### Item 1 (port grep) — full file list, 2026-09-03
 Every file containing `8080`/`8085`, classified against `serve.ps1`'s default
@@ -118,3 +122,43 @@ self-referential — pre-fix `serve.ps1:26` said `...or specify another port (e.
 (8085) that the message just reported as in-use, so the command as written does
 nothing. Fix: example now `-Port 8086` (a port other than the 8085 default), so the
 suggested command is actually runnable.
+
+### Item 6 (readiness loop HasExited / exit code) — inert under -NoExit; message FIXED, 2026-09-03
+The `HasExited` check exists and does halt the script (under
+`$ErrorActionPreference = "Stop"`, `Write-Error` is terminating — same pattern
+verified for the pre-checks, Items 3/5), BUT under the approved `-NoExit` design it
+cannot fire for the failure it claims to detect:
+- `$serverProcess` is the **wrapper**, not llama-server: `serve.ps1:96`
+  `$serverProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile",
+  "-NoExit", "-EncodedCommand", $encodedCommand) ... -PassThru`, and the wrapper's only
+  statement is `serve.ps1:94` `$commandLine = "& $(& $psQuote $LlamaServer) $($quotedArgs
+  -join ' ')"` — a bare `& "<llama-server>" <args>` with NO `exit $LastExitCode`.
+- `-NoExit` = "do not exit after running the specified command" (powershell.exe help).
+  So when llama-server exits during startup (VRAM OOM, bad Vulkan device, corrupt
+  GGUF), the wrapper command completes and the process drops to an interactive
+  prompt — it does NOT terminate. `HasExited` (`serve.ps1:105`) can only become true
+  if the user closes the detached window (or types `exit` in it). A real startup
+  failure therefore polls the full 60 s and falls into the else branch
+  (`serve.ps1:127-129`), whose guidance — "Check the llama-server console window for
+  error messages." — is CORRECT under `-NoExit` (the window stays open showing the
+  error); verified, no change there.
+- Exit code misattributed in all cases: `$serverProcess.ExitCode` is the wrapper's
+  code. Even in a hypothetical auto-exit, the wrapper's last statement `& <native>`
+  sets only `$LastExitCode` inside the child; the child PROCESS's own exit code would
+  be 0 (the documented propagation idiom is an explicit `exit $LastExitCode`, which
+  is absent) — so the old "llama-server exited before becoming ready (exit code N)"
+  never showed llama-server's code.
+Fix (single edit, message only, zero semantic risk): old `serve.ps1:106` said
+`llama-server exited before becoming ready (exit code N). Check the server window
+for details.` — both clauses wrong in the branch's only firing case (wrapper/window
+closed; code not llama-server's). New message names the wrapper process, labels the
+code as the wrapper's, states the `-NoExit` implication (a startup failure alone keeps
+the wrapper alive at a prompt showing the error), and tells the user to re-run
+serve.ps1 to capture the startup error.
+No functional fix applied: adding `; exit $LastExitCode` to `$commandLine` (or
+dropping `-NoExit`) is a recorded-design change — `serve.ps1:87` comment "Launch
+through PowerShell -NoExit so startup errors remain visible in the detached window"
+and AGENTS.md key fact — and whether an explicit `exit` inside the command
+terminates the process despite `-NoExit` is host-version-dependent and cannot be
+verified from this Mac (static review only). Tracked as a Windows-only follow-up
+under "Discovered".

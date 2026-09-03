@@ -67,3 +67,18 @@ llama-server (no 60 s poll after a conflict), matching the model/llama-server
 pre-checks. Found + fixed one actionability defect: the "another port" example was
 self-referential (`-Port 8085` — the very default port reported in-use); changed it
 to `-Port 8086` so the suggested command is runnable.
+
+## Iteration 6
+Item 6 (readiness-loop HasExited/exit code): the fast-fail path is INERT under the
+approved -NoExit design — `$serverProcess` is the powershell.exe WRAPPER
+(serve.ps1:96), and -NoExit keeps that process at an interactive prompt after
+llama-server's startup failure (command is a bare `& "<llama-server>" <args>`, no
+`exit $LastExitCode`, serve.ps1:94), so HasExited can only fire on a user-closed
+window; and the surfaced code was the wrapper's, never llama-server's. Fixed the
+Write-Error message (one edit, serve.ps1:106) to name the wrapper, label its exit
+code honestly, and say re-run to capture the error. 60 s fallback path verified
+correct as-is (window stays open under -NoExit). Surprising: -NoExit (the "keep
+startup errors visible" design choice) silently disables the loop's own
+HasExited detection; Windows-only follow-up (`; exit $LastExitCode` + verify
+exit-under--NoExit) noted in plan, NOT applied (unverifiable semantics here +
+recorded-design change).
