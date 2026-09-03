@@ -12,10 +12,10 @@
 
 ## Architecture (final)
 - **Windows (this PC, NVIDIA CUDA GPU)**: `llama-server` serves the Qwen
-  27B Q2_K_XL on `0.0.0.0:8080` — no auth (user chose LAN-only, no API key).
+  27B Q2_K_XL on `0.0.0.0:8085` — no auth (user chose LAN-only, no API key).
   All layers GPU offloaded (`-ngl 99`), ~64k context (`-c 65536`).
 - **Mac (client)**: `ralph.sh` loops `opencode run -p` (headless) against
-  `http://<WINDOWS_IP>:8080/v1`. The Mac's repo holds the Ralph files
+   `http://<WINDOWS_IP>:8085/v1`. The Mac's repo holds the Ralph files
   (PROMPT.md, AGENTS.md, specs/, IMPLEMENTATION_PLAN.md, progress.md, ralph.sh).
 
 ## Pi vs opencode (brief)

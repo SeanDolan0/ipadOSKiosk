@@ -21,8 +21,8 @@ experimental sandbox only).
 | Loop | **Ralph loop** (`ralph-gecko/ralph.sh`) | configured with pre-flight check |
 
 The whole flow:
-1. **Windows**: Run `download-model.ps1` → `serve.ps1` (listens on `0.0.0.0:8080`, offloading to RTX 5070 Ti).
-2. **Mac**: Set `WINDOWS_IP=192.168.x.y` → run `./ralph.sh` inside `ralph-gecko/`.
+1. **Windows**: Run `download-model.ps1` → `serve.ps1` (listens on `0.0.0.0:8085` by default, offloading to RTX 5070 Ti).
+2. **Mac**: Set `WINDOWS_IP=192.168.x.y` (and `PORT=8085`) → run `./ralph.sh` inside `ralph-gecko/`.
 
 ## 2. One-time setup (Windows Host)
 
@@ -30,8 +30,8 @@ The whole flow:
 # 1) Get the model (~9.83 GB). Run from repo root.
 powershell -ExecutionPolicy Bypass -File .\scripts\agent\download-model.ps1
 
-# 2) Allow inbound port 8080 through Windows Defender Firewall (Run in Admin PowerShell once):
-netsh advfirewall firewall add rule name="llama-server 8080" dir=in action=allow protocol=TCP localport=8080
+# 2) Allow inbound port 8085 through Windows Defender Firewall (Run in Admin PowerShell once):
+netsh advfirewall firewall add rule name="llama-server 8085" dir=in action=allow protocol=TCP localport=8085
 
 # 3) Start the server (opens llama-server in its own window)
 powershell -ExecutionPolicy Bypass -File .\scripts\agent\serve.ps1
@@ -43,13 +43,14 @@ On your Mac:
 ```bash
 cd ralph-gecko
 export WINDOWS_IP=192.168.50.177   # (or the LAN IP printed by serve.ps1)
+export PORT=8085                   # must match serve.ps1 --port (default 8085)
 ./ralph.sh 50
 ```
 
 `ralph.sh` will:
-- Verify network reachability to `http://${WINDOWS_IP}:8080/v1/models`.
+- Verify network reachability to `http://${WINDOWS_IP}:${PORT}/v1/models`.
 - Write local `opencode.json` pointing the `local/qwen3.8` provider to your Windows machine.
-- Drive `opencode run --model local/qwen3.8 --auto` headless with fresh context per iteration.
+- Drive `opencode run --model local/qwen3.8 --auto "$(cat PROMPT.md)"` headless with fresh context per iteration.
 
 ## 4. Hardware envelope (this Windows box, verified)
 - **RAM**: 32 GB system memory.
@@ -68,7 +69,7 @@ export WINDOWS_IP=192.168.50.177   # (or the LAN IP printed by serve.ps1)
 ```
 scripts/agent/
   download-model.ps1     # fetch GGUF from Hugging Face (--ssl-no-revoke supported)
-  serve.ps1              # llama-server on 0.0.0.0:8080 using RTX 5070 Ti (Vulkan1)
+  serve.ps1              # llama-server on 0.0.0.0:8085 using RTX 5070 Ti (Vulkan1)
   start-opencode.ps1     # verify server + launch opencode locally
 ralph-gecko/
   ralph.sh               # Mac-side Ralph loop runner (auto-configures opencode.json)
@@ -82,7 +83,7 @@ models/                  # (gitignored) where the 9.83 GB GGUF lands
 
 ## 6. Status / next steps
 - [ ] Run `download-model.ps1` to fetch `Qwen3.8-27B-UD-Q2_K_XL.gguf`.
-- [ ] Run `serve.ps1` and verify `http://127.0.0.1:8080/v1/models` returns model JSON.
+- [ ] Run `serve.ps1` and verify `http://127.0.0.1:8085/v1/models` returns model JSON.
 - [ ] Run the firewall command if inbound traffic from Mac is blocked.
 - [ ] On the Mac, run `ralph-gecko/ralph.sh`.
 

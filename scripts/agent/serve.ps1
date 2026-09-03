@@ -1,6 +1,6 @@
 # serve.ps1
 # Starts llama-server serving the local Qwen3.8-27B model on the OpenAI-compatible
-# endpoint that the Mac-side agent expects: http://<THIS_PC_LAN_IP>:8080/v1
+# endpoint that the Mac-side agent expects: http://<THIS_PC_LAN_IP>:8085/v1
 #
 # Serves the model on the LAN (0.0.0.0) so the Mac can reach it. No API key --
 # LAN-only exposure, so keep this on a trusted network.
@@ -8,7 +8,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\scripts\agent\serve.ps1
 #
 # Detaches llama-server into its own window so you can keep using this terminal.
-# Healthy check after start:  Invoke-RestMethod http://localhost:8080/v1/models
+# Healthy check after start:  Invoke-RestMethod http://localhost:8085/v1/models
 
 param(
     [int]$Port = 8085,

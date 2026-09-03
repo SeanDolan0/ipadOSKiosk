@@ -1,38 +1,58 @@
 # Ralph Loop Usage on the Local Qwen Agent
 
-## What the Ralph loop is
-A self-referential development loop (plugin: `ralph-loop`). It feeds the SAME prompt
-back after each iteration, so the agent iteratively improves toward a completion
-message. State file: `.claude/ralph-loop.local.md`.
+> This branch (`qwen-local-agent`) uses the **plugin-less Ralph loop** — a files +
+> bash-loop pattern, NOT a plugin (no `/ralph-loop` slash command, no
+> `.claude/ralph-loop.local.md`). See `ralph-loop-setup-guide.md` (repo root) for
+> the full technique.
 
-Invocation (from the harness prompt / CLI):
+## What the Ralph loop is
+A self-referential development loop. Each iteration runs opencode **headless** with a
+**fresh context window** (no memory of prior runs). The filesystem is the memory:
+`git history` (ground-truth changes), `IMPLEMENTATION_PLAN.md` (living state), and
+`progress.md` (append-only journal). The agent re-reads `PROMPT.md`/`AGENTS.md` cold
+every iteration, does exactly ONE item, then commits.
+
+## Files (all under `ralph-gecko/`)
+| File | Role |
+|---|---|
+| `ralph.sh` | The loop runner (Mac). Pre-flight-checks the Windows llama-server, auto-writes `opencode.json`, then iterates. |
+| `PROMPT.md` | The instruction set passed as the message each iteration. |
+| `AGENTS.md` | Durable operating manual / gotchas / signs. |
+| `IMPLEMENTATION_PLAN.md` | Living checklist (one item = one iteration). |
+| `progress.md` | Append-only run journal. |
+| `specs/*.md` | Durable requirements the plan is generated from. |
+
+## Running it
+```bash
+# 0. On Windows, serve the model (default port 8085):
+#    powershell -ExecutionPolicy Bypass -File .\scripts\agent\serve.ps1
+#
+# 1. On the Mac:
+cd ralph-gecko
+export WINDOWS_IP=192.168.50.177   # this PC's LAN IP (or the IP printed by serve.ps1)
+export PORT=8085                    # must match serve.ps1's --port (default 8085)
+./ralph.sh 50                       # cap at 50 iterations
+
+# ralph.sh stops early when IMPLEMENTATION_PLAN.md has no unchecked items left.
 ```
-/ralph-loop YOUR_PROMPT [--max-iterations N] [--completion-promise 'TEXT']
-```
-- No `--completion-promise` → runs forever (use `--max-iterations` to bound it).
-- Stop only via hitting `--max-iterations` or outputting `<promise>TEXT</promise>`.
-- The loop WILL NOT lie to exit — that is a hard rule of the plugin.
+
+`ralph.sh` writes a fresh `ralph-gecko/opencode.json` each run pointing the
+`local/qwen3.8` provider at `http://${WINDOWS_IP}:${PORT}/v1`, then drives
+`opencode run --model local/qwen3.8 --auto "$(cat PROMPT.md)"`.
 
 ## Why the user runs the local Qwen on a loop here
 - The 27B Q2 model is memory/CPU-bound; letting it self-iterate on one task in a
   branch (instead of being babysat) matches the "I can't monitor it" concern.
 - The loop writes its work to files/git history, which is reviewable later.
 
-## Recommended safe pattern for THIS branch (bounded, monitored)
-```
-/ralph-loop "Improve the README of this repo's scripts/agent/ directory" --max-iterations 5
-```
-Bounded loops are safer than unlimited on a slow local model. Prefer a scope the
-model can plausibly finish, so it does not churn forever on ~1 token/sec.
+## Recommended safe pattern on THIS branch (bounded, monitored)
+- Prefer a small, bounded run (`./ralph.sh 5`) on a scope the model can plausibly
+  finish, so it does not churn forever on a slow local model.
+- Because this branch is an experimental sandbox (`AI_AGENT_ENV.md`), keep loop
+  targets small and self-contained; review `git log` + `progress.md` + `logs/`
+  after each run.
 
-## Command reference (from ralph-loop plugin help)
-```
---max-iterations <n>           0 = unlimited (default)
---completion-promise '<text>'  exact phrase the loop greps for to stop
-```
-
-## On this branch — recommended loop tasks (examples only)
-- Iterate on `scripts/agent/serve.ps1` correctness until it starts clean.
-- Improve the `AI_AGENT_ENV.md` documentation for readability.
-- Generate a test prompt-set for the local model and evaluate outputs.
-Do NOT point the loop at Gecko engine work (that lives on `Gecko-Rewrite`).
+## Tuning
+When Ralph does something wrong, don't just fix the code by hand — add a "sign"
+(capitalized blunt correction) to `ralph-gecko/AGENTS.md` so the *next* iteration
+won't repeat the mistake. That feedback loop is the real tuning mechanism.

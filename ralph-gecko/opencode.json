@@ -3,7 +3,7 @@
   "provider": {
     "local": {
       "options": {
-        "baseURL": "http://<WINDOWS_IP>:8085/v1",
+        "baseURL": "http://192.168.50.139:8085/v1",
         "apiKey": "sk-dummy"
       },
       "models": {

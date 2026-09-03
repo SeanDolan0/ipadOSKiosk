@@ -1,39 +1,45 @@
-# IMPLEMENTATION_PLAN.md — Phase 0: build libxul for arm64-apple-ios12.0
+# IMPLEMENTATION_PLAN.md — serve.ps1 static hardening (safe sandbox target)
 
-Regenerable/disposable. If it drifts from reality, REGENERATE from `specs/*`,
-don't hand-patch a confused plan. **One item = one tiny, verifiable step.**
-
-> RULE: if an item would take you more than a few minutes of focused work or
-> would blow past a small context window, it is TOO BIG. Split it. Each item
-> must be a SINGLE small action with a clearly checkable done-state (a command
-> run, a file created, a value confirmed, a decision recorded).
+Disposable/regenable. **One item = one tiny, verifiable step.** The loop picks the
+highest unchecked item and does ONLY that. Static review only — never claim to
+have run the script.
 
 ## In progress / next up (highest first)
-- [ ] Find this PC's LAN IP (ipconfig) — needed so the Mac knows where Qwen lives
-- [ ] Decide how the Mac and this PC will move files (SSH? shared drive? git push/pull?)
-- [ ] Confirm the Mac is reachable from this PC (ping / ssh test, record result)
-- [ ] On the Mac: check Xcode is installed (`xcode-select -p`), record version
-- [ ] On the Mac: check what iOS SDKs are present (`xcodebuild -showsdks`), record
-- [ ] On the Mac: confirm rustup is installed; if not, note install steps
-- [ ] On the Mac: add the `aarch64-apple-ios` rust target
-- [ ] Decide + RECORD in specs/phase0-libxul.md: which source tree (mozilla-central vs gecko-tls vs GeckoEmbed re-derivation)
-- [ ] Pick ONE known-good source URL/hash for the chosen tree; note disk-space need
-- [ ] On the Mac: clone the source tree (or download snapshot) — one command, note it takes a while
-- [ ] Copy `Gecko/mozconfig.ios12.template` into the source tree as `.mozconfig`
-- [ ] Resolve + document: is `--enable-application=embed` still valid in this tree? (grep the tree for it)
-- [ ] Fill in the real SDK path in `.mozconfig` (`--with-macos-sdk=...`)
-- [ ] Confirm `--target=aarch64-apple-ios` and `IPHONEOS_DEPLOYMENT_TARGET=12.0` are set
-- [ ] Run `./mach bootstrap`; save the FULL output to docs/build-logs/
-- [ ] Run `./mach configure`; save FULL output; if it fails, paste the first real error
-- [ ] If configure failed: fix the single reported error, re-run configure
-- [ ] Run `./mach build`; save FULL output to docs/build-logs/ (will take hours)
-- [ ] If build failed: extract the FIRST actual compile/link error and save it alone
-- [ ] Fix that ONE error (may be several small sub-steps), re-run the failing piece
-- [ ] MILESTONE: confirm a `libxul` artifact exists for arm64-apple-ios12.0
-- [ ] MILESTONE: add it to a throwaway Xcode project and confirm it links
+- [x] Grep the whole repo for stale `:8080` (or `8085`) llama-server references; list every file that disagrees with `serve.ps1`'s default `-Port 8085`
+- [ ] Verify `ralph-gecko/ralph.sh` `PORT=8085` default matches `serve.ps1` `-Port 8085`; fix if drifted
+- [ ] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
+- [ ] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
+- [ ] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
+- [ ] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
+- [ ] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
+- [ ] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
+- [ ] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
 
 ## Done
 (none yet)
 
 ## Discovered along the way
-(loop appends blockers, gotchas, new sub-tasks here — split any new item small)
+(loop appends blockers/gotchas/new sub-tasks here)
+
+### Item 1 (port grep) — full file list, 2026-09-03
+Every file containing `8080`/`8085`, classified against `serve.ps1`'s default
+`-Port 8085`:
+
+- **llama-server, already 8085 (no change):** `scripts/agent/serve.ps1`,
+  `scripts/agent/start-opencode.ps1`, `ralph-gecko/ralph.sh`,
+  `ralph-gecko/opencode.json`, `ralph-gecko/opencode.json.template`,
+  `AI_AGENT_ENV.md`, `docs/ralph-loop-usage.md`
+- **llama-server, stale `8080` — FIXED to 8085:** `docs/agent-research.md`
+  (2 lines: `0.0.0.0:8080` and `http://<WINDOWS_IP>:8080/v1` in the
+  "Architecture (final)" section — present-tense, so it disagreed)
+- **`8080` present but NOT llama-server (kiosk daemon REST API, separate
+  subsystem — explicitly OUT of scope for this loop, left untouched):**
+  `kiosk-app-features.md`, `docs/superpowers/specs/2026-09-01-bidirectional-mqtt-rest-tts-design.md`,
+  `docs/superpowers/plans/2026-09-01-bidirectional-mqtt-rest-tts.md`,
+  `Daemon/main.m` (`#define HTTP_PORT 8080`), `Daemon/tests/test_http_server.c`
+  (`TEST_PORT 18080`)
+- **Historical/append-only (port moved 8080->8085 is itself the narrative;
+  do not rewrite history):** `docs/build-logs/2026-09-02-gecko-phase0-progress.md`
+  (lines 84/92 record state at commit 340bb58, before the port move),
+  `ralph-gecko/progress.md`, `ralph-gecko/specs/serve-ps1.md`,
+  `ralph-gecko/AGENTS.md`, `ralph-gecko/PROMPT.md`, this plan itself
