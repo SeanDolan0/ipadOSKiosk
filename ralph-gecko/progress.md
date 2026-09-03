@@ -97,3 +97,16 @@ still borderline. Nitpick: the "saves ~50% VRAM" comment is really ~44% (1.125 v
 fallback is borderline at 64k on a 12 GB GPU, so a clean fit needs shorter context
 or a smaller KV quant. Windows-only handoff (decide default q4_0 / shorter context /
 document expected OOM) recorded in plan, NOT applied.
+
+## Iteration 8
+Item 8 (WINDOWS_IP guidance $Port): VERIFIED, no fix — the printed guidance uses the
+actual `$Port`; no hardcoded 8080/8085 in any runtime line. `serve.ps1:122`
+`export WINDOWS_IP=$PrimaryIp` is IP-only (correct: WINDOWS_IP is an IP var, no port
+belongs in it — the spec's "it writes `:8085`" was inaccurate), and every printed line
+that references a port uses `$Port` (serve.ps1:80/109/120/123/124/125/129); only the
+file-header comments (serve.ps1:3,11) and the param default (serve.ps1:14) carry 8085.
+Found + tracked as a new item (NOT fixed this iteration, out of item 8's port-only
+scope): the LAN-IP filter `serve.ps1:46` `-notlike "172.*"` drops the valid 172.16.0.0/12
+(RFC1918) private range, so on a 172.16.x.x LAN `$PrimaryIp` (serve.ps1:48) falls back
+to the `<THIS_PC_LAN_IP>` placeholder — a real edge-case bug in the discovery half of
+spec item 5.

@@ -12,7 +12,8 @@ have run the script.
 - [x] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
 - [x] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
 - [x] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
-- [ ] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
+- [x] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
+- [ ] LAN-IP filter: `serve.ps1:46` `-notlike "172.*"` drops valid 172.16.0.0/12 (RFC1918) LAN range → `$PrimaryIp` falls back to `<THIS_PC_LAN_IP>` on such networks (discovered while doing Item 8)
 - [ ] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
 
 ## Done
@@ -197,3 +198,37 @@ estimated ~15 GB > 12 GB, so first launch as configured likely OOMs. A human on
 Windows should decide: change the default to q4_0, lower the default context, or
 document the expected first-launch OOM + `-CacheType q4_0` retry. Not applied here
 (spec: do not re-tune; architecture unverified).
+
+### Item 8 (WINDOWS_IP guidance $Port) — VERIFIED, no fix; LAN-IP filter bug found, 2026-09-03
+Spec item 5 (guidance half). The runtime-printed guidance uses the actual `$Port`;
+there is NO hardcoded `8080`/`8085` in any printed line. Verbatim proof (serve.ps1):
+- `serve.ps1:122` `Write-Host "  export WINDOWS_IP=$PrimaryIp"` — the `export
+  WINDOWS_IP` line references only the IP (`$PrimaryIp`), which is correct: WINDOWS_IP
+  is an IP address and takes no port. (The spec's parenthetical "it writes `:8085`" is
+  itself inaccurate — the printed export line writes no port; the port lives in the
+  adjacent lines, which DO use `$Port`.)
+- Every printed line that DOES reference a port uses `$Port`:
+  - `serve.ps1:80` `Starting llama-server on http://0.0.0.0:$Port (LAN-reachable) ...`
+  - `serve.ps1:109` `Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/models"` (readiness poll)
+  - `serve.ps1:120` `Local endpoint:  http://127.0.0.1:$Port/v1`
+  - `serve.ps1:123` `curl http://${PrimaryIp}:$Port/v1/models`
+  - `serve.ps1:124` `...make sure Windows Firewall allows TCP ${Port}:`
+  - `serve.ps1:125` `netsh advfirewall ... localport=$Port`
+  - `serve.ps1:129` `You can test manually with:  Invoke-RestMethod http://127.0.0.1:$Port/v1/models`
+- The only hardcoded port literals in the file are `serve.ps1:3` and `serve.ps1:11`
+  (file-header COMMENTS documenting the 8085 default) and `serve.ps1:14`
+  `[int]$Port = 8085,` (the param default). `serve.ps1:26`'s `-Port 8086` is the
+  intentional "another port" example from Item 5. No `8080` anywhere in the file.
+So the guidance correctly tracks whatever `-Port` the user passes; verified, no fix.
+Finding (NEW item, NOT fixed this iteration — the filter is the "discovery" half of
+spec item 5, outside item 8's port-only scope): the LAN-IP filter
+`serve.ps1:45-47` `... -and $_.IPAddress -notlike "172.*" ...` drops EVERY 172.x.x
+address, including the valid RFC1918 private range 172.16.0.0/12 (a perfectly valid
+LAN subnet). On a 172.16.x.x network that filter empties `$LanIps`, so
+`$PrimaryIp` (`serve.ps1:48`) falls back to `"<THIS_PC_LAN_IP>"` and the guidance
+(`serve.ps1:122-123`) prints the placeholder instead of the user's real IP — forcing
+manual IP discovery. The other filters are fine (`*Loopback*` interface drop,
+`169.254*` link-local drop) and 192.168/10.x are kept, so the `172.*` arm is the
+inconsistent one. Tracked as the next unchecked item above (fix = keep RFC1918
+private ranges, e.g. narrow the drop to public/other, or at minimum re-include
+172.16.0.0/12).
