@@ -9,7 +9,7 @@ have run the script.
 - [x] Verify `ralph-gecko/ralph.sh` `PORT=8085` default matches `serve.ps1` `-Port 8085`; fix if drifted
 - [x] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
 - [x] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
-- [ ] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
+- [x] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
 - [ ] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
 - [ ] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
 - [ ] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
@@ -93,3 +93,28 @@ now line 92) and the command is transported via `-EncodedCommand`
 (Base64 UTF-16LE, new `$encodedCommand` line 95, `Start-Process ... -EncodedCommand
 $encodedCommand` line 96) so `Start-Process` performs no re-quoting; spaces, single
 quotes, double quotes, and backticks in `$Model`/`$LlamaServer` all survive intact.
+
+### Item 5 (port-in-use check) — reliability verified; message example FIXED, 2026-09-03
+Reliability of the check (serve.ps1:21-27) holds, no change needed:
+- `serve.ps1:22` `Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
+  Where-Object { $_.State -eq 'Listen' }` filters on `State -eq 'Listen'` — the correct,
+  reliable state: only a socket actually bound-and-listening counts. An outbound
+  ESTABLISHED connection to a remote :8085 (whose LOCAL port is ephemeral) never
+  matches, so no false positive; a listening socket is always `Listen`, so no
+  false negative for the "port taken for binding" case.
+- The check actually halts the script: `serve.ps1:19` sets `$ErrorActionPreference =
+  "Stop"`, and under Stop, `Write-Error` is terminating (PowerShell throws
+  `ParentContainsErrorRecordException`), so execution stops at `serve.ps1:26` BEFORE
+  launching llama-server — no wasted 60 s readiness poll after a conflict. This is
+  consistent with the other pre-checks (`serve.ps1:34` model-not-found,
+  `serve.ps1:41` llama-server-not-found), which use the same `Write-Error`+Stop pattern.
+- Degraded-but-harmless edge: if `OwningProcess` is 0 (kernel/other-user socket),
+  `Get-Process -Id 0 -ErrorAction SilentlyContinue` (serve.ps1:25) returns nothing,
+  so the message shows `process '' (PID: 0)` — still actionable ("stop that process
+  or use another port"), so not worth a fix.
+Actionability defect (single fix applied): the message's "another port" example was
+self-referential — pre-fix `serve.ps1:26` said `...or specify another port (e.g.
+.\scripts\agent\serve.ps1 -Port 8085).`, i.e. it suggested the SAME default port
+(8085) that the message just reported as in-use, so the command as written does
+nothing. Fix: example now `-Port 8086` (a port other than the 8085 default), so the
+suggested command is actually runnable.

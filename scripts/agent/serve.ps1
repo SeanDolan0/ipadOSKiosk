@@ -23,7 +23,7 @@ $existingConn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyConti
 if ($existingConn) {
     $procId = $existingConn[0].OwningProcess
     $procName = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
-    Write-Error "Port $Port is already in use by process '$procName' (PID: $procId). Either stop that process or specify another port (e.g. .\scripts\agent\serve.ps1 -Port 8085)."
+    Write-Error "Port $Port is already in use by process '$procName' (PID: $procId). Either stop that process or specify another port (e.g. .\scripts\agent\serve.ps1 -Port 8086)."
 }
 
 # Model path (adjust if you put the GGUF elsewhere)

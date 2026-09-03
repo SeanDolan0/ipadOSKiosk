@@ -56,3 +56,14 @@ re-quoting — spaces/quotes/backticks in the model path survive. Surprising bit
 "spaces" framing undersold it — the escaper's wrong single/double convention was a
 separate, quote-only corruption; the `-EncodedCommand` transport fixes the spaces
 case the old `-Command` path couldn't.
+
+## Iteration 5
+Item 5 (port-in-use check): verified the check is reliable — `serve.ps1:22` filters
+`State -eq 'Listen'` (the only state a bound-and-listening socket has), so an
+outbound ESTABLISHED connection to a remote :8085 (ephemeral local port) never
+false-positives; and under `$ErrorActionPreference = "Stop"` (serve.ps1:19) the
+`Write-Error` at serve.ps1:26 is terminating, so the script halts before launching
+llama-server (no 60 s poll after a conflict), matching the model/llama-server
+pre-checks. Found + fixed one actionability defect: the "another port" example was
+self-referential (`-Port 8085` — the very default port reported in-use); changed it
+to `-Port 8086` so the suggested command is runnable.
