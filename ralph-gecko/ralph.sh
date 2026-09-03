@@ -58,9 +58,9 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
   echo "=== Ralph iteration $i/$MAX_ITERATIONS ==="
 
   # Fresh context every iteration: pipe PROMPT.md into a NEW headless opencode run.
-  # --auto approves non-destructive tool calls in unattended headless execution.
+  # --yolo bypasses the need for user confirmation in unattended headless execution.
   if command -v opencode >/dev/null 2>&1; then
-    cat PROMPT.md | opencode run --model local/qwen3.8 --auto \
+    cat PROMPT.md | opencode run --model local/qwen3.8 --yolo \
       2>&1 | tee "$LOG_DIR/iteration-$i.log"
   else
     echo "opencode not found on this machine — cannot run the loop headless. Install it: npm i -g opencode-ai"

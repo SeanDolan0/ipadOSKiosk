@@ -10,7 +10,21 @@
 # Detaches llama-server into its own window so you can keep using this terminal.
 # Healthy check after start:  Invoke-RestMethod http://localhost:8080/v1/models
 
+param(
+    [int]$Port = 8085,
+    [int]$Context = 65536,
+    [string]$CacheType = "q8_0"
+)
+
 $ErrorActionPreference = "Stop"
+
+# Check if port is already in use
+$existingConn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
+if ($existingConn) {
+    $procId = $existingConn[0].OwningProcess
+    $procName = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+    Write-Error "Port $Port is already in use by process '$procName' (PID: $procId). Either stop that process or specify another port (e.g. .\scripts\agent\serve.ps1 -Port 8085)."
+}
 
 # Model path (adjust if you put the GGUF elsewhere)
 $ModelDir = Join-Path $PSScriptRoot "..\..\models"
@@ -35,43 +49,46 @@ $PrimaryIp = if ($LanIps) { $LanIps[0] } else { "<THIS_PC_LAN_IP>" }
 
 # Common llama-server flags:
 #   -m <model>            GGUF to load
-#   --port 8080           OpenAI-compatible port (matches opencode provider)
+#   --port <port>         OpenAI-compatible port (matches opencode provider)
 #   --host 0.0.0.0        bind all interfaces so the Mac can reach it over the LAN
 #                          (no auth -- only run on a trusted network)
 #   -dev Vulkan1          Offload explicitly to NVIDIA GeForce RTX 5070 Ti (Vulkan1)
 #   -ngl 99               offload ALL layers to the NVIDIA GPU
-#   -c 32768              32k context (fits safely in 12GB VRAM with model + KV cache)
-#   -ctk q8_0             quantized KV cache K (saves ~50% VRAM)
-#   -ctv q8_0             quantized KV cache V (saves ~50% VRAM)
-#   --mlock               keep model pinned in RAM (recommended)
+#   -c 65536              64k context window
+#   -ctk q8_0             quantized KV cache K (saves ~50% VRAM; use q4_0 if tight on VRAM)
+#   -ctv q8_0             quantized KV cache V (saves ~50% VRAM; use q4_0 if tight on VRAM)
+#   --load-mode mlock     keep model pinned in RAM (recommended)
 #   --jinja               enable ChatML/jinja template handling for Qwen3
 #   -np 1                 single slot (stable for one agent)
 #
-# Health check on the Mac:  curl http://<WINDOWS_IP>:8080/v1/models
+# Health check on the Mac:  curl http://<WINDOWS_IP>:$Port/v1/models
 
 $args = @(
     "-m", $Model,
     "--host", "0.0.0.0",
-    "--port", "8080",
+    "--port", "$Port",
     "-dev", "Vulkan1",       # NVIDIA GeForce RTX 5070 Ti Laptop GPU
     "-ngl", "99",            # Offload all layers to GPU
-    "-c", "32768",           # 32k context fits in 12 GB VRAM
-    "-ctk", "q8_0",          # 8-bit quantized KV cache K
-    "-ctv", "q8_0",          # 8-bit quantized KV cache V
-    "--mlock",
+    "-c", "$Context",        # 64k context (65536 tokens)
+    "-ctk", $CacheType,      # Quantized KV cache K
+    "-ctv", $CacheType,      # Quantized KV cache V
+    "--load-mode", "mlock",
     "--jinja",
     "-np", "1"
 )
 
-Write-Host "Starting llama-server on http://0.0.0.0:8080 (LAN-reachable) ..." -ForegroundColor Cyan
+Write-Host "Starting llama-server on http://0.0.0.0:$Port (LAN-reachable) ..." -ForegroundColor Cyan
 Write-Host "Target Device: Vulkan1 (NVIDIA GeForce RTX 5070 Ti)" -ForegroundColor Cyan
 Write-Host "Model: $Model" -ForegroundColor Gray
+Write-Host "Context: $Context tokens | KV Cache: $CacheType" -ForegroundColor Gray
 Write-Host "Detected LAN IP(s): $($LanIps -join ', ')" -ForegroundColor Cyan
 Write-Host "(Run in a detached window so it stays up; close that window to stop the server.)" -ForegroundColor Yellow
 
-# Launch in a detached window so THIS terminal stays usable for opencode
-Start-Process -FilePath $LlamaServer -ArgumentList $args -WindowStyle Normal
-
+# Launch through PowerShell -NoExit so startup errors remain visible in the detached window
+$psQuote = { param($value) '"' + ($value -replace "'", "''") + '"' }
+$quotedArgs = $args | ForEach-Object { & $psQuote $_ }
+$commandLine = "& $(& $psQuote $LlamaServer) $($quotedArgs -join ' ')"
+$serverProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-NoExit", "-Command", $commandLine) -WorkingDirectory $ModelDir -WindowStyle Normal -PassThru
 Write-Host ""
 Write-Host "Waiting for server readiness..." -ForegroundColor Yellow
 $maxWaitSec = 60
@@ -80,8 +97,11 @@ $isReady = $false
 
 while ($sw.Elapsed.TotalSeconds -lt $maxWaitSec) {
     Start-Sleep -Seconds 3
+    if ($serverProcess.HasExited) {
+        Write-Error "llama-server exited before becoming ready (exit code $($serverProcess.ExitCode)). Check the server window for details."
+    }
     try {
-        $m = Invoke-RestMethod -Uri "http://127.0.0.1:8080/v1/models" -TimeoutSec 2
+        $m = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/models" -TimeoutSec 2
         $isReady = $true
         break
     } catch {
@@ -92,14 +112,14 @@ while ($sw.Elapsed.TotalSeconds -lt $maxWaitSec) {
 if ($isReady) {
     Write-Host "`n=== llama-server is READY ===" -ForegroundColor Green
     Write-Host "Model: $($m.data[0].id)" -ForegroundColor Green
-    Write-Host "Local endpoint:  http://127.0.0.1:8080/v1" -ForegroundColor Green
+    Write-Host "Local endpoint:  http://127.0.0.1:$Port/v1" -ForegroundColor Green
     Write-Host "`nFrom your Mac terminal, run:" -ForegroundColor Cyan
     Write-Host "  export WINDOWS_IP=$PrimaryIp" -ForegroundColor White
-    Write-Host "  curl http://${PrimaryIp}:8080/v1/models" -ForegroundColor White
-    Write-Host "`nNote: If the Mac cannot connect, make sure Windows Firewall allows TCP 8080:" -ForegroundColor Yellow
-    Write-Host "  netsh advfirewall firewall add rule name=`"llama-server 8080`" dir=in action=allow protocol=TCP localport=8080" -ForegroundColor DarkGray
+    Write-Host "  curl http://${PrimaryIp}:$Port/v1/models" -ForegroundColor White
+    Write-Host "`nNote: If the Mac cannot connect, make sure Windows Firewall allows TCP ${Port}:" -ForegroundColor Yellow
+    Write-Host "  netsh advfirewall firewall add rule name=`"llama-server $Port`" dir=in action=allow protocol=TCP localport=$Port" -ForegroundColor DarkGray
 } else {
     Write-Host "`nServer did not respond within ${maxWaitSec}s." -ForegroundColor Yellow
     Write-Host "Check the llama-server console window for error messages." -ForegroundColor Yellow
-    Write-Host "You can test manually with:  Invoke-RestMethod http://127.0.0.1:8080/v1/models" -ForegroundColor Gray
+    Write-Host "You can test manually with:  Invoke-RestMethod http://127.0.0.1:$Port/v1/models" -ForegroundColor Gray
 }

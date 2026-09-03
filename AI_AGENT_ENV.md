@@ -16,7 +16,7 @@ experimental sandbox only).
 | Model | `unsloth/Qwen3.8-27B-GGUF` → `Qwen3.8-27B-UD-Q2_K_XL.gguf` (9.83 GB, Q2_K_XL Unsloth Dynamic) | Ready to download via `download-model.ps1` |
 | Runtime | **llama.cpp** `llama-server` (WinGet: `ggml.llamacpp` v0.1.2-dev build 10507, Vulkan backend) | installed, verified |
 | GPU | **NVIDIA GeForce RTX 5070 Ti Laptop GPU** (12 GB VRAM, Vulkan device `Vulkan1`) | detected, verified |
-| Context | 32k (`-c 32768`) with 8-bit quantized KV cache (`-ctk q8_0 -ctv q8_0`) | configured to fit 12 GB VRAM |
+| Context | 64k (`-c 65536`) with quantized KV cache (`-ctk q8_0 -ctv q8_0`) | default 64k context |
 | Harness (Mac) | **opencode** (headless `opencode run --model local/qwen3.8 --auto`) | configured in `ralph-gecko/ralph.sh` |
 | Loop | **Ralph loop** (`ralph-gecko/ralph.sh`) | configured with pre-flight check |
 
@@ -60,8 +60,8 @@ export WINDOWS_IP=192.168.50.177   # (or the LAN IP printed by serve.ps1)
 - **Engine settings**:
   - `-dev Vulkan1`: Forces offloading to RTX 5070 Ti instead of Intel graphics.
   - `-ngl 99`: Offloads all model layers into GPU memory.
-  - `-c 32768`: 32k context window.
-  - `-ctk q8_0 -ctv q8_0`: Quantizes the KV cache to 8-bit, keeping total memory (model + KV cache) under 12 GB.
+  - `-c 65536`: 64k context window.
+  - `-ctk q8_0 -ctv q8_0`: Quantizes KV cache (use `q4_0` if VRAM is tight with 64k).
 - **LAN IP**: `192.168.50.177` (Ethernet) or `192.168.50.139` (Wi-Fi).
 
 ## 5. Files in this branch
