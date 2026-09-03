@@ -11,7 +11,7 @@ have run the script.
 - [x] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
 - [x] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
 - [x] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
-- [ ] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
+- [x] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
 - [ ] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
 - [ ] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
 
@@ -162,3 +162,38 @@ and AGENTS.md key fact — and whether an explicit `exit` inside the command
 terminates the process despite `-NoExit` is host-version-dependent and cannot be
 verified from this Mac (static review only). Tracked as a Windows-only follow-up
 under "Discovered".
+
+### Item 7 (VRAM estimate) — internally consistent; default est. over 12 GB, mitigation documented, 2026-09-03
+Spec item 2. Verdict: the flag set is internally consistent (line-by-line below)
+and the q4_0 mitigation is documented, so the item PASSES via the "documents a
+mitigation" path. No re-tune applied (spec: "just verify the flag set is internally
+consistent and documented"). One real finding recorded: the documented DEFAULT
+(q8_0 at 64k) is estimated to exceed the 12 GB GPU, so first launch as configured
+likely OOMs.
+Internal consistency (verbatim, all agree):
+- `serve.ps1:15` `[int]$Context = 65536,` = comment `serve.ps1:57` `-c 65536` = arg `serve.ps1:72` `"-c", "$Context",`
+- `serve.ps1:16` `[string]$CacheType = "q8_0"` = comments `serve.ps1:58-59` `-ctk q8_0`/`-ctv q8_0` = args `serve.ps1:73-74` `"-ctk", $CacheType` / `"-ctv", $CacheType`
+- `serve.ps1:71` `"-ngl", "99",` = comment `serve.ps1:56` `-ngl 99`; `serve.ps1:70` `"-dev", "Vulkan1",` = comment `serve.ps1:55`; `serve.ps1:75` `"--load-mode", "mlock",` = comment `serve.ps1:60`; `serve.ps1:76` `"--jinja",` = comment `serve.ps1:61`; `serve.ps1:77` `"-np", "1"` = comment `serve.ps1:62`
+No drift among param defaults, the comment block, and the `$args` array.
+VRAM estimate (ESTIMATE — exact KV size needs the model architecture from the GGUF,
+which is NOT downloaded (9.83 GB, out of scope); assuming a Qwen3-27B-like
+architecture: 64 layers, GQA 24 query / 4 KV heads, head_dim 128 — an ASSUMPTION,
+not a measurement):
+- Weights (Q2_K_XL, `-ngl 99`): ~9.83 GB (file size; in-VRAM ≈ file + small alignment).
+- Per-token KV elements: 2 (K+V) × 64 layers × 4 KV heads × 128 head_dim = 65,536.
+- q8_0 = 1.125 B/element (32×1 B + 4 B scale per 32): 73,728 B/token × 65,536 ≈ 4.8 GB.
+- q4_0 ≈ 0.56–0.625 B/element: ≈ 2.4–2.7 GB. Compute/activation buffers: ~0.3–0.5 GB.
+- Totals: q8_0 at 64k ≈ 9.9 + 4.8 + 0.4 ≈ **~15.1 GB** (over 12 GB by ~3 GB — default OOMs);
+  q4_0 at 64k ≈ 9.9 + 2.4–2.7 + 0.4 ≈ **~12.7–13.0 GB** (borderline, at/slightly over 12 GB).
+So even the documented q4_0 mitigation is borderline at 64k on a 12 GB GPU; a clean fit
+would need a shorter context, a smaller KV quant (q2/q1), or fewer offloaded layers.
+Mitigation (documented, not changed): `serve.ps1:58-59` "use q4_0 if tight on VRAM";
+`-CacheType` param (`serve.ps1:16`) lets a user run `.\serve.ps1 -CacheType q4_0`;
+`AI_AGENT_ENV.md:65` repeats "use q4_0 if VRAM is tight with 64k".
+Nitpick, no fix: `serve.ps1:58-59` "saves ~50% VRAM" — q8_0 (1.125 B) vs fp16 KV (2 B)
+saves ~44%, not ~50%; within the "~" leeway and it is a comment, so not fixed.
+Windows-only handoff (NOT applied): the default `-CacheType q8_0` at `-c 65536` is
+estimated ~15 GB > 12 GB, so first launch as configured likely OOMs. A human on
+Windows should decide: change the default to q4_0, lower the default context, or
+document the expected first-launch OOM + `-CacheType q4_0` retry. Not applied here
+(spec: do not re-tune; architecture unverified).

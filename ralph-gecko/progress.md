@@ -82,3 +82,18 @@ startup errors visible" design choice) silently disables the loop's own
 HasExited detection; Windows-only follow-up (`; exit $LastExitCode` + verify
 exit-under--NoExit) noted in plan, NOT applied (unverifiable semantics here +
 recorded-design change).
+
+## Iteration 7
+Item 7 (VRAM estimate): verified the flag set is internally consistent
+(`serve.ps1:15/16` param defaults = `:56-59` comment block = `:70-74` `$args`,
+line-by-line) and the q4_0 mitigation is documented (`serve.ps1:58-59`, `:73-74`;
+`AI_AGENT_ENV.md:65`), so the item passes. No re-tune (per spec). Real finding,
+recorded not fixed: assuming a Qwen3-27B-like architecture (64 layers, GQA 4 KV
+heads, head_dim 128 — an ASSUMPTION; the 9.83 GB GGUF is not downloaded, out of
+scope), q8_0 at 64k ≈ 9.9 GB weights + 4.8 GB KV ≈ **~15 GB > 12 GB**, so the
+DEFAULT likely OOMs on first launch; the documented q4_0 mitigation ≈ ~12.7–13 GB,
+still borderline. Nitpick: the "saves ~50% VRAM" comment is really ~44% (1.125 vs
+2 B/element) — within "~", not fixed. Surprising bit: even the recommended q4_0
+fallback is borderline at 64k on a 12 GB GPU, so a clean fit needs shorter context
+or a smaller KV quant. Windows-only handoff (decide default q4_0 / shorter context /
+document expected OOM) recorded in plan, NOT applied.
