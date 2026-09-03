@@ -14,7 +14,7 @@ have run the script.
 - [x] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
 - [x] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
 - [x] LAN-IP filter: `serve.ps1:46` `-notlike "172.*"` drops valid 172.16.0.0/12 (RFC1918) LAN range → `$PrimaryIp` falls back to `<THIS_PC_LAN_IP>` on such networks (discovered while doing Item 8)
-- [ ] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
+- [x] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
 
 ## Done
 (none yet)
@@ -266,3 +266,45 @@ No port, launch, or readiness change; `$PrimaryIp` (now `serve.ps1:54`) and the
 printed guidance lines are untouched. Static review only: no pwsh on this
 Mac, so the edit is by inspection (script-block `param($ip)`, `.Split('.')`,
 `[int]` cast, and `& $IsRfc1918` invocation are all standard PowerShell).
+
+### Item 10 (start-opencode.ps1 parity) — VERIFIED, consistent, no fix; one nit, 2026-09-03
+Plan item: "Confirm `start-opencode.ps1` (if present) is consistent with
+`serve.ps1`'s port/model/health-check". The script is present
+(`scripts/agent/start-opencode.ps1`, 26 lines). Verdict: all three dimensions
+match; no code change. Verbatim proof:
+- **Port**: `start-opencode.ps1:13` `$m = Invoke-RestMethod -Uri
+  "http://127.0.0.1:8085/v1/models" -TimeoutSec 5` hardcodes 8085, which equals
+  `serve.ps1:14` `[int]$Port = 8085,`. The hardcode is the script's documented
+  contract, not drift: its own header (`start-opencode.ps1:3-4`) says opencode
+  "reads the GLOBAL config (~/.config/opencode/opencode.json) which already
+  defines provider 'local' -> http://localhost:8085/v1, model local/qwen3.8"
+  and that "THIS script just verifies the server is reachable and launches
+  opencode here" — i.e. the check must match the port opencode's config will
+  actually use (8085). A `serve.ps1 -Port <other>` server is unreachable by
+  opencode itself (the global config is pinned to 8085 and lives outside this
+  repo), so the check failing there is the correct behavior, not a bug.
+  `start-opencode.ps1:13` is the only executable port use; the other `:8085`
+  in the file is the header comment (`start-opencode.ps1:4`).
+- **Model**: no model name in code — `start-opencode.ps1:14` prints the
+  server-reported `$m.data[0].id`; the header's `local/qwen3.8` matches
+  `ralph.sh:59` (`"model": "local/qwen3.8"`), `ralph.sh:72`
+  (`opencode run --model local/qwen3.8 --auto`), and `AI_AGENT_ENV.md:20`.
+  The served file `Qwen3.8-27B-UD-Q2_K_XL.gguf` (`serve.ps1:31`) is the same
+  model.
+- **Health check**: path `/v1/models` on loopback — identical to
+  `serve.ps1:115` (`http://127.0.0.1:$Port/v1/models`) and `AI_AGENT_ENV.md:86`
+  (`verify http://127.0.0.1:8085/v1/models returns model JSON`); same
+  terminating `try/catch` + `Write-Error` under
+  `$ErrorActionPreference = "Stop"` pattern already verified in Items 3/5
+  (`start-opencode.ps1:9,15-17`). `$Repo` (`start-opencode.ps1:20`,
+  `Split-Path -Parent` twice on `$PSScriptRoot` = `<root>/scripts/agent`)
+  yields the repo root, whose `opencode.json` (10 lines) holds only an `mcp`
+  block — NO `provider`/`model` keys — so nothing in-repo overrides the global
+  config the header describes; the header claim is consistent with the
+  in-repo state.
+Nit (recorded, NOT fixed — plan precedent "nitpick, no fix" from Items 3/5/7):
+`start-opencode.ps1:16`'s error "Model server is NOT running. Start it first:
+ .\scripts\agent\serve.ps1" doesn't name the port it checked (8085). A user
+ who started with `serve.ps1 -Port 8086` sees "NOT running" — but the check
+ (and opencode's global config) are pinned to 8085 by design, so the message
+ is actionable as-is.

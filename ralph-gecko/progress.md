@@ -122,3 +122,17 @@ deliberate behavior note: the old blacklist's keep-everything-else arm also
 surfaced public IPs (e.g. 203.x) as "LAN IPs"; the whitelist tightens that,
 which matches the script's LAN-reachability purpose. No pwsh on this Mac —
 static review by inspection only, no execution claimed.
+
+## Iteration 10
+Item 10 (start-opencode.ps1 parity): verified the optional Windows launcher is
+consistent with serve.ps1 on port/model/health-check — the 8085 hardcoded at
+start-opencode.ps1:13 matches serve.ps1:14's default AND is the script's
+documented contract (its header pins opencode's GLOBAL config, outside the
+repo, to localhost:8085/v1 — so a `serve.ps1 -Port <other>` server is
+unreachable by opencode itself and the check failing there is correct); the
+model id is printed dynamically from /v1/models (`$m.data[0].id`) and the
+header's local/qwen3.8 matches ralph.sh:59/72 + AI_AGENT_ENV.md:20; the
+/v1/models health path and terminating Write-Error-under-Stop pattern match
+serve.ps1:115. No fix; nit recorded in plan (error msg omits port 8085).
+This was the last unchecked plan item — ralph.sh's stop condition
+(no `^- \[ \]` lines) will end the loop after this commit.
