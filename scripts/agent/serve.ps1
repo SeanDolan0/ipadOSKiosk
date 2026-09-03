@@ -1,6 +1,9 @@
 # serve.ps1
 # Starts llama-server serving the local Qwen3.8-27B model on the OpenAI-compatible
-# endpoint that opencode's 'local/qwen3.8' provider expects: http://localhost:8080/v1
+# endpoint that the Mac-side agent expects: http://<THIS_PC_LAN_IP>:8080/v1
+#
+# Serves the model on the LAN (0.0.0.0) so the Mac can reach it. No API key --
+# LAN-only exposure, so keep this on a trusted network.
 #
 #   powershell -ExecutionPolicy Bypass -File .\scripts\agent\serve.ps1
 #
@@ -27,25 +30,28 @@ if (-not $LlamaServer) {
 # Common llama-server flags:
 #   -m <model>            GGUF to load
 #   --port 8080           OpenAI-compatible port (matches opencode provider)
-#   --host 127.0.0.1      localhost only (safe, nothing exposed)
-#   -c 32768              context; tune down to 16384 if RAM/CPU are tight
+#   --host 0.0.0.0        bind all interfaces so the Mac can reach it over the LAN
+#                          (no auth -- only run on a trusted network)
+#   -c 65536              ~64k context (fits on GPU with Q2_K_XL)
 #   --mlock               keep model pinned in RAM (recommended)
-#   -ngl 99               offload to GPU if you have one; on CPU-only set to 0
+#   -ngl 99               offload ALL layers to the NVIDIA GPU
 #   --jinja               enable ChatML/jinja template handling for Qwen3
 #   -np 1                 single slot (stable for one agent)
+#
+# Health check on the Mac:  curl http://<WINDOWS_IP>:8080/v1/models
 
 $args = @(
     "-m", $Model,
-    "--host", "127.0.0.1",
+    "--host", "0.0.0.0",
     "--port", "8080",
-    "-c", "32768",
+    "-c", "65536",
     "--mlock",
-    "-ngl", "0",            # CPU-only; bump to 99 if you have a discrete GPU
+    "-ngl", "99",           # NVIDIA GPU: offload all layers
     "--jinja",
     "-np", "1"
 )
 
-Write-Host "Starting llama-server on http://127.0.0.1:8080 ..." -ForegroundColor Cyan
+Write-Host "Starting llama-server on http://0.0.0.0:8080 (LAN-reachable) ..." -ForegroundColor Cyan
 Write-Host "Model: $Model" -ForegroundColor Gray
 Write-Host "(Run in a NEW window so it stays up; close that window to stop the server.)" -ForegroundColor Yellow
 
@@ -57,7 +63,8 @@ Write-Host "Waiting for the server to come up (model load can take 30-120s on CP
 Start-Sleep -Seconds 8
 try {
     $m = Invoke-RestMethod -Uri "http://127.0.0.1:8080/v1/models" -TimeoutSec 5
+    Write-Host "From the Mac, point your agent at:  http://<THIS_PC_LAN_IP>:8080/v1" -ForegroundColor Green
     Write-Host "OK - server up. Model: $($m.data[0].id)" -ForegroundColor Green
 } catch {
-    Write-Host "Not up yet. Give it more time, then check:  Invoke-RestMethod http://127.0.0.1:8080/v1/models" -ForegroundColor Yellow
+    Write-Host "Not up yet. Find this PC's LAN IP (ipconfig) and give it more time, then check:  Invoke-RestMethod http://127.0.0.1:8080/v1/models" -ForegroundColor Yellow
 }
