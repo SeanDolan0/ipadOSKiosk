@@ -26,7 +26,8 @@ Write-Host "Destination: $OutPath" -ForegroundColor Cyan
 Write-Host "Size ~9.83 GB. This will take a while on slow links." -ForegroundColor Yellow
 
 # -L follow redirects (HF redirects to CDN), -C - resume on partial download
-& curl.exe -L -C - -o $OutPath $HfUrl
+# --ssl-no-revoke prevents CRYPT_E_NO_REVOCATION_CHECK (0x80092012) on Windows Schannel
+& curl.exe --ssl-no-revoke -L -C - -o $OutPath $HfUrl
 if ($LASTEXITCODE -ne 0) {
     Write-Error "curl failed with exit code $LASTEXITCODE"
 }

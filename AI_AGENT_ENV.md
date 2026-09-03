@@ -13,65 +13,78 @@ experimental sandbox only).
 
 | Piece | What | Status |
 |---|---|---|
-| Model | `unsloth/Qwen3.8-27B-GGUF` → `Qwen3.8-27B-UD-Q2_K_XL.gguf` (9.83 GB, Q2_K_XL Unsloth Dynamic) | NOT yet downloaded |
-| Runtime | **llama.cpp** `llama-server` (installed via WinGet, v0.1.2-dev build 10507) | installed |
-| Harness | **opencode** (gives tools: read/write/edit/bash + MCP) | installed, config exists |
-| Loop | **Ralph loop** plugin/command | see docs/ralph-loop-usage.md |
+| Model | `unsloth/Qwen3.8-27B-GGUF` → `Qwen3.8-27B-UD-Q2_K_XL.gguf` (9.83 GB, Q2_K_XL Unsloth Dynamic) | Ready to download via `download-model.ps1` |
+| Runtime | **llama.cpp** `llama-server` (WinGet: `ggml.llamacpp` v0.1.2-dev build 10507, Vulkan backend) | installed, verified |
+| GPU | **NVIDIA GeForce RTX 5070 Ti Laptop GPU** (12 GB VRAM, Vulkan device `Vulkan1`) | detected, verified |
+| Context | 32k (`-c 32768`) with 8-bit quantized KV cache (`-ctk q8_0 -ctv q8_0`) | configured to fit 12 GB VRAM |
+| Harness (Mac) | **opencode** (headless `opencode run --model local/qwen3.8 --auto`) | configured in `ralph-gecko/ralph.sh` |
+| Loop | **Ralph loop** (`ralph-gecko/ralph.sh`) | configured with pre-flight check |
 
-The whole flow: `download-model` → `serve` (llama-server on :8080) → `start-opencode`
-(opencode with provider `local/qwen3.8` → that OpenAI-compat endpoint).
+The whole flow:
+1. **Windows**: Run `download-model.ps1` → `serve.ps1` (listens on `0.0.0.0:8080`, offloading to RTX 5070 Ti).
+2. **Mac**: Set `WINDOWS_IP=192.168.x.y` → run `./ralph.sh` inside `ralph-gecko/`.
 
-## 2. One-time setup
+## 2. One-time setup (Windows Host)
 
 ```powershell
 # 1) Get the model (~9.83 GB). Run from repo root.
 powershell -ExecutionPolicy Bypass -File .\scripts\agent\download-model.ps1
 
-# 2) Start the server (opens llama-server in its own window)
+# 2) Allow inbound port 8080 through Windows Defender Firewall (Run in Admin PowerShell once):
+netsh advfirewall firewall add rule name="llama-server 8080" dir=in action=allow protocol=TCP localport=8080
+
+# 3) Start the server (opens llama-server in its own window)
 powershell -ExecutionPolicy Bypass -File .\scripts\agent\serve.ps1
 ```
 
-Then open a second terminal:
-```powershell
-# 3) Launch the harness against the local model
-powershell -ExecutionPolicy Bypass -File .\scripts\agent\start-opencode.ps1
+## 3. Running the Ralph Loop from the Mac
+
+On your Mac:
+```bash
+cd ralph-gecko
+export WINDOWS_IP=192.168.50.177   # (or the LAN IP printed by serve.ps1)
+./ralph.sh 50
 ```
 
-## 3. How the pieces connect (verified 2026-09-02)
-
-- **opencode global config** `~/.config/opencode/opencode.json` already defines:
-  - `provider.local` → `{ baseURL: http://localhost:8080/v1, apiKey: sk-dummy }`
-  - `provider.local.models.qwen3.8` and default `model: local/qwen3.8`
-  - MCP servers: **context7** (docs), **wiremcp** (custom; `C:\Users\sedol\Documents\WireMCP\index.js`)
-  - Plugins: `ecc-universal`, `superpowers@git+...`
-- **llama-server** (llama.cpp) exposes an OpenAI-compatible API at
-  `http://127.0.0.1:8080/v1` — that is exactly the baseURL the opencode provider hits.
-- So the user does NOT need to write new provider config; the harness + config exist.
-  This branch documents and scripts the missing "download + serve" glue and adds docs.
+`ralph.sh` will:
+- Verify network reachability to `http://${WINDOWS_IP}:8080/v1/models`.
+- Write local `opencode.json` pointing the `local/qwen3.8` provider to your Windows machine.
+- Drive `opencode run --model local/qwen3.8 --auto` headless with fresh context per iteration.
 
 ## 4. Hardware envelope (this Windows box, verified)
-- RAM: **32 GB** — fits a ~9.8 GB Q2 K_XL model with room for a 32k context.
-- GPU: **no non-integrated GPU detected via wmic** → the serve script sets `-ngl 0`
-  (CPU inference). Expected throughput: a few tokens/sec for 27B Q2 on CPU. Fine for
-  agentic tasks; not fast. If a discrete GPU becomes available, bump `-ngl 99`.
-- Disk: ~52 GB free — enough for the 9.8 GB model + llama.cpp + opencode (~1 GB sober).
+- **RAM**: 32 GB system memory.
+- **GPU**: NVIDIA GeForce RTX 5070 Ti Laptop GPU (12 GB VRAM).
+- **Vulkan Devices**:
+  - `Vulkan0`: Intel(R) Graphics (integrated)
+  - `Vulkan1`: NVIDIA GeForce RTX 5070 Ti Laptop GPU (discrete)
+- **Engine settings**:
+  - `-dev Vulkan1`: Forces offloading to RTX 5070 Ti instead of Intel graphics.
+  - `-ngl 99`: Offloads all model layers into GPU memory.
+  - `-c 32768`: 32k context window.
+  - `-ctk q8_0 -ctv q8_0`: Quantizes the KV cache to 8-bit, keeping total memory (model + KV cache) under 12 GB.
+- **LAN IP**: `192.168.50.177` (Ethernet) or `192.168.50.139` (Wi-Fi).
 
 ## 5. Files in this branch
 ```
 scripts/agent/
-  download-model.ps1     # fetch GGUF from Hugging Face (resumable curl)
-  serve.ps1              # llama-server on 127.0.0.1:8080 with the model
-  start-opencode.ps1     # verify server + launch opencode in repo root
-docs/ralph-loop-usage.md # how to run this on the Ralph loop
+  download-model.ps1     # fetch GGUF from Hugging Face (--ssl-no-revoke supported)
+  serve.ps1              # llama-server on 0.0.0.0:8080 using RTX 5070 Ti (Vulkan1)
+  start-opencode.ps1     # verify server + launch opencode locally
+ralph-gecko/
+  ralph.sh               # Mac-side Ralph loop runner (auto-configures opencode.json)
+  PROMPT.md              # per-iteration prompt
+  AGENTS.md              # instructions & operational constraints
+  IMPLEMENTATION_PLAN.md # living checklist
+  progress.md            # append-only run log
 AI_AGENT_ENV.md          # this file
 models/                  # (gitignored) where the 9.83 GB GGUF lands
 ```
 
 ## 6. Status / next steps
-- [ ] Download the model (script provided).
-- [ ] First run: serve + verify `/v1/models`, then opencode chat sanity check.
-- [ ] Decide harness: opencode (configured) vs Pi (Pi infra exists in ~/.claude/daemon).
-- [ ] Document a concrete Ralph-loop prompt/task on this env.
+- [ ] Run `download-model.ps1` to fetch `Qwen3.8-27B-UD-Q2_K_XL.gguf`.
+- [ ] Run `serve.ps1` and verify `http://127.0.0.1:8080/v1/models` returns model JSON.
+- [ ] Run the firewall command if inbound traffic from Mac is blocked.
+- [ ] On the Mac, run `ralph-gecko/ralph.sh`.
 
 ## 7. Rules (user requirements)
 - This branch is experimental sandbox. Do NOT merge experiment cruft back into

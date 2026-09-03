@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "local": {
+      "options": {
+        "baseURL": "http://<WINDOWS_IP>:8080/v1",
+        "apiKey": "sk-dummy"
+      },
+      "models": {
+        "qwen3.8": {}
+      }
+    }
+  },
+  "model": "local/qwen3.8"
+}
