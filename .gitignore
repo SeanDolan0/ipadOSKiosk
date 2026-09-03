@@ -22,3 +22,11 @@ install_on_ipad.sh
 # Gecko build artifacts (large binaries, never commit)
 /Gecko/libxul.framework/
 /Gecko/build/
+
+
+# --- qwen-local-agent branch ---
+# Model binary: 9.83 GB, downloaded, never commit
+/models/
+# llama.cpp / opencode local runtime junk
+*.log
+llama-server*.json
