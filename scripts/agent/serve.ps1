@@ -41,9 +41,15 @@ if (-not $LlamaServer) {
     Write-Error "llama-server not found on PATH. Install via: winget install ggml.llamacpp"
 }
 
-# Detect LAN IP(s) for user convenience
+# Detect LAN IP(s) for user convenience: keep only RFC1918 private addresses
+# (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) - a public address is not a LAN address.
+$IsRfc1918 = {
+    param($ip)
+    $o = $ip.Split('.') | ForEach-Object { [int]$_ }
+    ($o[0] -eq 10) -or ($o[0] -eq 172 -and $o[1] -ge 16 -and $o[1] -le 31) -or ($o[0] -eq 192 -and $o[1] -eq 168)
+}
 $LanIps = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254*" -and $_.IPAddress -notlike "172.*" } |
+    Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254*" -and (& $IsRfc1918 $_.IPAddress) } |
     Select-Object -ExpandProperty IPAddress
 $PrimaryIp = if ($LanIps) { $LanIps[0] } else { "<THIS_PC_LAN_IP>" }
 

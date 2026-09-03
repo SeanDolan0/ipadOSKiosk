@@ -13,7 +13,7 @@ have run the script.
 - [x] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
 - [x] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
 - [x] Confirm the printed `export WINDOWS_IP=...` guidance line uses the actual `$Port` (not a hardcoded 8080/8085)
-- [ ] LAN-IP filter: `serve.ps1:46` `-notlike "172.*"` drops valid 172.16.0.0/12 (RFC1918) LAN range → `$PrimaryIp` falls back to `<THIS_PC_LAN_IP>` on such networks (discovered while doing Item 8)
+- [x] LAN-IP filter: `serve.ps1:46` `-notlike "172.*"` drops valid 172.16.0.0/12 (RFC1918) LAN range → `$PrimaryIp` falls back to `<THIS_PC_LAN_IP>` on such networks (discovered while doing Item 8)
 - [ ] Confirm `start-opencode.ps1` (if present) is consistent with `serve.ps1`'s port/model/health-check
 
 ## Done
@@ -232,3 +232,37 @@ manual IP discovery. The other filters are fine (`*Loopback*` interface drop,
 inconsistent one. Tracked as the next unchecked item above (fix = keep RFC1918
 private ranges, e.g. narrow the drop to public/other, or at minimum re-include
 172.16.0.0/12).
+
+### Item 9 (LAN-IP filter 172.16.0.0/12) — FIXED in serve.ps1, 2026-09-03
+Spec item 5 (discovery half). Pre-fix verbatim (old `serve.ps1:45-48`):
+- `$LanIps = Get-NetIPAddress -AddressFamily IPv4 ... | Where-Object {
+  $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254*"
+  -and $_.IPAddress -notlike "172.*" } | Select-Object -ExpandProperty IPAddress`
+- `$PrimaryIp = if ($LanIps) { $LanIps[0] } else { "<THIS_PC_LAN_IP>" }`
+The `-notlike "172.*"` arm dropped EVERY 172.x.x.x address, including the
+RFC1918 private range 172.16.0.0/12 (172.16.x.x–172.31.x.x) — a perfectly valid
+LAN subnet (common in corporate/VM networks). On such a network `$LanIps` came
+back empty, so `$PrimaryIp` fell back to the `<THIS_PC_LAN_IP>` placeholder and
+the printed guidance (`export WINDOWS_IP=$PrimaryIp` /
+`curl http://${PrimaryIp}:$Port/v1/models`) showed the placeholder instead of
+the real IP, forcing manual discovery. The other filters were already correct
+(`*Loopback*` interface drop, `169.254*` link-local drop; 10.* and 192.168.*
+kept) — the `172.*` arm was the inconsistent one.
+Fix (single edit, filter predicate only): replaced the blacklist with an
+RFC1918 whitelist. New `serve.ps1:46-50` defines
+`$IsRfc1918 = { param($ip) $o = $ip.Split('.') | ForEach-Object { [int]$_ };
+($o[0] -eq 10) -or ($o[0] -eq 172 -and $o[1] -ge 16 -and $o[1] -le 31) -or
+($o[0] -eq 192 -and $o[1] -eq 168) }`
+and the pipeline (now `serve.ps1:51-53`) gates on `(& $IsRfc1918
+$_.IPAddress)` in place of `-notlike "172.*"`. Result: 172.16.x.x–172.31.x.x
+now survive (the bug); 10.* and 192.168.* still survive; and — a deliberate
+tightening of the old blacklist's keep-everything-else behavior — public
+addresses (incl. 172.0–15.x.x, 172.32+.x.x, and any other public 203.x-style
+address) are no longer offered as a "LAN IP"; a machine with only public
+addresses gets the placeholder, which is correct for the script's "the Mac
+reaches Windows over the LAN" purpose. The explicit `-notlike "169.254*"`
+link-local arm is retained (redundant with the whitelist but documents intent).
+No port, launch, or readiness change; `$PrimaryIp` (now `serve.ps1:54`) and the
+printed guidance lines are untouched. Static review only: no pwsh on this
+Mac, so the edit is by inspection (script-block `param($ip)`, `.Split('.')`,
+`[int]` cast, and `& $IsRfc1918` invocation are all standard PowerShell).

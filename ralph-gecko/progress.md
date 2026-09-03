@@ -110,3 +110,15 @@ scope): the LAN-IP filter `serve.ps1:46` `-notlike "172.*"` drops the valid 172.
 (RFC1918) private range, so on a 172.16.x.x LAN `$PrimaryIp` (serve.ps1:48) falls back
 to the `<THIS_PC_LAN_IP>` placeholder — a real edge-case bug in the discovery half of
 spec item 5.
+
+## Iteration 9
+Item 9 (LAN-IP filter 172.16.0.0/12): fixed the discovery bug found in iteration 8 —
+old `serve.ps1:46` `-notlike "172.*"` dropped EVERY 172.x.x.x address, so on a
+172.16.x.x LAN `$LanIps` was empty and the guidance printed the
+`<THIS_PC_LAN_IP>` placeholder. Replaced the blacklist with an RFC1918 whitelist
+(new `$IsRfc1918` script block, serve.ps1:46-50; 10.0.0.0/8, 172.16.0.0/12,
+192.168.0.0/16), so 172.16–31.x.x now survive and the real IP is detected. One
+deliberate behavior note: the old blacklist's keep-everything-else arm also
+surfaced public IPs (e.g. 203.x) as "LAN IPs"; the whitelist tightens that,
+which matches the script's LAN-reachability purpose. No pwsh on this Mac —
+static review by inspection only, no execution claimed.
