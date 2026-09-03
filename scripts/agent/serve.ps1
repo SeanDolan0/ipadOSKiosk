@@ -84,11 +84,16 @@ Write-Host "Context: $Context tokens | KV Cache: $CacheType" -ForegroundColor Gr
 Write-Host "Detected LAN IP(s): $($LanIps -join ', ')" -ForegroundColor Cyan
 Write-Host "(Run in a detached window so it stays up; close that window to stop the server.)" -ForegroundColor Yellow
 
-# Launch through PowerShell -NoExit so startup errors remain visible in the detached window
-$psQuote = { param($value) '"' + ($value -replace "'", "''") + '"' }
+# Launch through PowerShell -NoExit so startup errors remain visible in the detached window.
+# Each argument is emitted as a double-quoted string: backticks are doubled and double
+# quotes are doubled (single quotes need no escaping in a double-quoted string). The
+# whole command is then passed to the child via -EncodedCommand (Base64 UTF-16LE), so
+# Start-Process does no re-quoting and spaces/quotes/backticks in the model path stay intact.
+$psQuote = { param($value) '"' + (($value -replace '`', '``') -replace '"', '""') + '"' }
 $quotedArgs = $args | ForEach-Object { & $psQuote $_ }
 $commandLine = "& $(& $psQuote $LlamaServer) $($quotedArgs -join ' ')"
-$serverProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-NoExit", "-Command", $commandLine) -WorkingDirectory $ModelDir -WindowStyle Normal -PassThru
+$encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandLine))
+$serverProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-NoExit", "-EncodedCommand", $encodedCommand) -WorkingDirectory $ModelDir -WindowStyle Normal -PassThru
 Write-Host ""
 Write-Host "Waiting for server readiness..." -ForegroundColor Yellow
 $maxWaitSec = 60

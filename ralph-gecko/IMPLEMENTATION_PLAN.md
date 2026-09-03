@@ -8,7 +8,7 @@ have run the script.
 - [x] Grep the whole repo for stale `:8080` (or `8085`) llama-server references; list every file that disagrees with `serve.ps1`'s default `-Port 8085`
 - [x] Verify `ralph-gecko/ralph.sh` `PORT=8085` default matches `serve.ps1` `-Port 8085`; fix if drifted
 - [x] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
-- [ ] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
+- [x] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
 - [ ] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
 - [ ] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
 - [ ] Confirm `-ngl 99` + 64k ctx + `-ctk q8_0 -ctv q8_0` VRAM estimate is internally consistent (does not exceed ~12 GB or documents a mitigation)
@@ -74,3 +74,22 @@ Nitpick, no fix: line 46 writes `serve.ps1 --port`; the script's actual param
 is `-Port` (`serve.ps1:14`). `--port` is the llama-server flag that serve.ps1
 forwards (`serve.ps1:69` `--port "$Port"`), so the shorthand is defensible and
 the stated default (8085) is correct either way — not a port mismatch.
+
+### Item 4 ($psQuote quoting) — BROKEN, FIXED in serve.ps1, 2026-09-03
+The manual quoting was broken in two compounding ways (pre-fix verbatim):
+- Old `serve.ps1:88` `$psQuote = { param($value) '"' + ($value -replace "'", "''") + '"' }`
+  wraps each value in **double** quotes but escapes **single** quotes by doubling.
+  In a PowerShell double-quoted string, `'` needs no escaping (so a path like
+  `C:\O'Brien\...gguf` was sent as `C:\O''Brien\...` — wrong file), and `"`/`` ` ``
+  are the chars that actually need escaping (doubled / backtick-doubled) — neither
+  was handled, so any `"` in the value terminated the string early.
+- Old `serve.ps1:91` `Start-Process ... @("-NoProfile","-NoExit","-Command", $commandLine)`:
+  `$commandLine` always contains spaces, so `Start-Process` re-quotes the element
+  (wrapping in quotes without escaping its internal quotes) — garbling even the
+  spaces-only case.
+Fix (serve.ps1, single change): escaper now emits correct double-quote form
+(`$psQuote = { param($value) '"' + (($value -replace '`','``') -replace '"','""') + '"' }`,
+now line 92) and the command is transported via `-EncodedCommand`
+(Base64 UTF-16LE, new `$encodedCommand` line 95, `Start-Process ... -EncodedCommand
+$encodedCommand` line 96) so `Start-Process` performs no re-quoting; spaces, single
+quotes, double quotes, and backticks in `$Model`/`$LlamaServer` all survive intact.

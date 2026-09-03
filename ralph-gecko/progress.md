@@ -39,3 +39,20 @@ Bypass -File .\scripts\agent\serve.ps1`) matches `serve.ps1:8` verbatim.
 Verified, no fix needed; only nitpick: line 46 says `serve.ps1 --port` where
 the real param is `-Port` (llama-server's `--port` flag is what it forwards) —
 noted in plan, no change.
+
+## Iteration 4
+Item 4 ($psQuote quoting): reviewed the manual quoting and found it BROKEN in two
+ways, fixed both in serve.ps1 (one change). (1) Old line 88 wrapped each arg in
+DOUBLE quotes but escaped SINGLE quotes by doubling (`-replace "'", "''"`), which is
+the wrong convention: a `'` needs no escaping in a double-quoted string (so a path
+like `C:\O'Brien\x.gguf` was sent as `C:\O''Brien\...`), while `"` and `` ` `` — the
+chars that DO need escaping in `"..."` — were left unescaped (a `"` terminated the
+string early). (2) Old line 91 sent `$commandLine` via `Start-Process -Command`;
+that string always has spaces, so Start-Process re-quoted the element without
+escaping its internal quotes, garbling even the plain spaces case. Fix: escaper now
+doubles backticks then doubles `"` (correct double-quote form), and the command is
+passed to the child via `-EncodedCommand` (Base64 UTF-16LE) so Start-Process does no
+re-quoting — spaces/quotes/backticks in the model path survive. Surprising bit: the
+"spaces" framing undersold it — the escaper's wrong single/double convention was a
+separate, quote-only corruption; the `-EncodedCommand` transport fixes the spaces
+case the old `-Command` path couldn't.
