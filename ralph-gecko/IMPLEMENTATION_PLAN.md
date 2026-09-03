@@ -6,7 +6,7 @@ have run the script.
 
 ## In progress / next up (highest first)
 - [x] Grep the whole repo for stale `:8080` (or `8085`) llama-server references; list every file that disagrees with `serve.ps1`'s default `-Port 8085`
-- [ ] Verify `ralph-gecko/ralph.sh` `PORT=8085` default matches `serve.ps1` `-Port 8085`; fix if drifted
+- [x] Verify `ralph-gecko/ralph.sh` `PORT=8085` default matches `serve.ps1` `-Port 8085`; fix if drifted
 - [ ] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
 - [ ] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
 - [ ] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
@@ -43,3 +43,13 @@ Every file containing `8080`/`8085`, classified against `serve.ps1`'s default
   (lines 84/92 record state at commit 340bb58, before the port move),
   `ralph-gecko/progress.md`, `ralph-gecko/specs/serve-ps1.md`,
   `ralph-gecko/AGENTS.md`, `ralph-gecko/PROMPT.md`, this plan itself
+
+### Item 2 (ralph.sh port parity) — verified, no drift, 2026-09-03
+`ralph.sh` default matches `serve.ps1` default; no fix needed. Proof (verbatim):
+- `ralph.sh:28`: `PORT="${PORT:-8085}"` — the only port default assignment in the file
+- `serve.ps1:14`: `[int]$Port = 8085,` — the only port default assignment in the file
+- Every live use of the port in `ralph.sh` expands `${PORT}` (no hardcoded literal):
+  preflight echo line 31 (`http://${WINDOWS_IP}:${PORT}/v1/models ...`),
+  preflight `curl` line 32, error echo line 33, and the generated
+  `opencode.json` `baseURL` line 51 (`"baseURL": "http://${WINDOWS_IP}:${PORT}/v1"`)
+- Comments naming the default (ralph.sh lines 6-7, 27, 36) all say 8085, matching
