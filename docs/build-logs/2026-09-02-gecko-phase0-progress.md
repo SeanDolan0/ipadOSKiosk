@@ -52,3 +52,17 @@
 
 ## Status: BLOCKED on build-environment decision
 Phase 0 (build libxul) cannot proceed on Windows-only. Need decision on Mac availability.
+
+---
+
+## UPDATE (same session) — Decision recorded
+
+**User confirmed: a Mac IS available** for the Gecko/libxul build. Artifacts will be built on the Mac,
+then copied to Windows for Theos integration (or the whole Theos build could also move to the Mac).
+
+### Next steps (Phase 0)
+1. Determine how to reach the Mac (SSH hostname/IP from this Windows box).
+2. On the Mac: install Xcode + iOS 12.0 SDK compatible toolchain, rustup with aarch64-apple-ios.
+3. Clone mozilla-central (or gecko-tls fork with iOS patches).
+4. Create iOS 12.0 mozconfig, run ./mach build -> libxul.
+5. Copy artifacts back to this repo under Gecko/ (gitignored until needed).

@@ -1,0 +1,25 @@
+# Gecko for iOS 12 — mozconfig template
+# COPY this to your Gecko source tree as .mozconfig (or set $MOZCONFIG to it) and
+# adjust the SDK path. See GECKO_REWRITE_HANDOFF.md -> Phase 0 for the full how-to.
+#
+# WARNING: the `--enable-application=embed` framework may have been renamed in
+# modern mozilla-central. VERIFY against the source you chose before building.
+
+mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/../gecko-ios-objs
+
+# Apple iOS 12 target
+ac_add_options --target=aarch64-apple-ios
+ac_add_options --with-macos-sdk=<PATH_TO_IOS_SDK_OR_12_CAPABLE_TOOLCHAIN>
+ac_add_options IPHONEOS_DEPLOYMENT_TARGET=12.0
+
+# Minimal embedding
+ac_add_options --enable-application=embed
+
+# Speed + reliability for a kiosk
+ac_add_options --disable-tests
+ac_add_options --disable-debug
+ac_add_options --enable-optimize
+
+# iOS has no JIT; keep interpreter-only until Phase 3
+ac_add_options --disable-jit
+ac_add_options --disable-jemalloc

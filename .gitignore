@@ -18,3 +18,7 @@ qwen-*
 context_for_qwen.md
 deploy_from_package.sh
 install_on_ipad.sh
+# --- Gecko rewrite ---
+# Gecko build artifacts (large binaries, never commit)
+/Gecko/libxul.framework/
+/Gecko/build/
