@@ -30,3 +30,12 @@ Item 2 (ralph.sh port parity): verified `ralph.sh:28` `PORT="${PORT:-8085}"`
 matches `serve.ps1:14` `[int]$Port = 8085,`; every live port use in ralph.sh
 (preflight curl lines 31-33, generated opencode baseURL line 51) expands
 `${PORT}` — no drift, verification only, no fix applied.
+
+## Iteration 3
+Item 3 (AI_AGENT_ENV.md 8085 parity): grepped the repo-root doc for
+`8080`/`8085` — zero `8080` hits, all 7 port literals are `8085` matching
+`serve.ps1:14` default; invocation line 37 (`powershell -ExecutionPolicy
+Bypass -File .\scripts\agent\serve.ps1`) matches `serve.ps1:8` verbatim.
+Verified, no fix needed; only nitpick: line 46 says `serve.ps1 --port` where
+the real param is `-Port` (llama-server's `--port` flag is what it forwards) —
+noted in plan, no change.

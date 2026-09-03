@@ -7,7 +7,7 @@ have run the script.
 ## In progress / next up (highest first)
 - [x] Grep the whole repo for stale `:8080` (or `8085`) llama-server references; list every file that disagrees with `serve.ps1`'s default `-Port 8085`
 - [x] Verify `ralph-gecko/ralph.sh` `PORT=8085` default matches `serve.ps1` `-Port 8085`; fix if drifted
-- [ ] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
+- [x] Verify `AI_AGENT_ENV.md` (repo root) states the 8085 default consistently (search 8080/8085)
 - [ ] Review the manual quoting (`$psQuote`) used to build the `Start-Process` command line for paths with spaces; fix if broken
 - [ ] Confirm the port-in-use check (`Get-NetTCPConnection -LocalPort $Port`) is reliable and its error message is actionable
 - [ ] Confirm the readiness loop detects `$serverProcess.HasExited` and surfaces the exit code
@@ -53,3 +53,24 @@ Every file containing `8080`/`8085`, classified against `serve.ps1`'s default
   preflight `curl` line 32, error echo line 33, and the generated
   `opencode.json` `baseURL` line 51 (`"baseURL": "http://${WINDOWS_IP}:${PORT}/v1"`)
 - Comments naming the default (ralph.sh lines 6-7, 27, 36) all say 8085, matching
+
+### Item 3 (AI_AGENT_ENV.md 8085 parity) — verified, no drift, 2026-09-03
+`AI_AGENT_ENV.md` states the 8085 default consistently: ZERO `8080` occurrences
+in the file; all 7 port-literal hits are `8085`, matching `serve.ps1:14`
+`[int]$Port = 8085,`. Verbatim proof (AI_AGENT_ENV.md line numbers):
+- Line 24: `Run `download-model.ps1` → `serve.ps1` (listens on `0.0.0.0:8085` by default, ...)`
+- Line 25: `Set `WINDOWS_IP=192.168.x.y` (and `PORT=8085`)`
+- Line 33: `# 2) Allow inbound port 8085 through Windows Defender Firewall`
+- Line 34: `netsh advfirewall firewall add rule name="llama-server 8085" ... localport=8085`
+- Line 46: `export PORT=8085                   # must match serve.ps1 --port (default 8085)`
+- Line 72: `serve.ps1              # llama-server on 0.0.0.0:8085 using RTX 5070 Ti (Vulkan1)`
+- Line 86: `verify `http://127.0.0.1:8085/v1/models` returns model JSON`
+Invocation parity also holds: AI_AGENT_ENV.md line 37
+`powershell -ExecutionPolicy Bypass -File .\scripts\agent\serve.ps1` matches
+`serve.ps1:8`'s documented usage line verbatim; the `WINDOWS_IP` guidance
+(line 45, "or the LAN IP printed by serve.ps1") matches `serve.ps1:84`
+(`Detected LAN IP(s)`) and `serve.ps1:117` (`export WINDOWS_IP=$PrimaryIp`).
+Nitpick, no fix: line 46 writes `serve.ps1 --port`; the script's actual param
+is `-Port` (`serve.ps1:14`). `--port` is the llama-server flag that serve.ps1
+forwards (`serve.ps1:69` `--port "$Port"`), so the shorthand is defensible and
+the stated default (8085) is correct either way — not a port mismatch.
